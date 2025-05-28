@@ -701,7 +701,7 @@ const FileUploadZone = ({ onFileUpload, fileType, currentFile }) => {
         >
           <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
           <p className="text-lg font-medium mb-2">Drop {fileType} CSV file here</p>
-          <p className="text-gray-500 mb-4">or</p>
+          <p className="text-gray-800 mb-4">or</p>
           <input
             type="file"
             accept=".csv"
@@ -715,7 +715,7 @@ const FileUploadZone = ({ onFileUpload, fileType, currentFile }) => {
           >
             Browse Files
           </label>
-          <p className="text-xs text-gray-400 mt-2">Supports CSV files up to 25MB</p>
+          <p className="text-xs text-gray-700 mt-2">Supports CSV files up to 25MB</p>
         </div>
       ) : (
         <div className="border rounded-lg p-4 bg-green-50">
@@ -724,7 +724,7 @@ const FileUploadZone = ({ onFileUpload, fileType, currentFile }) => {
               <FileText className="h-5 w-5 text-green-600 mr-2" />
               <div>
                 <p className="font-medium">{currentFile.filename}</p>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-800">
                   {currentFile.data.length.toLocaleString()} rows, {currentFile.headers.length} columns
                 </p>
               </div>
@@ -848,18 +848,18 @@ const LinkingDashboard = ({ linking, onLink }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Left Column - Record Counts */}
           <div>
-            <h5 className="font-medium text-gray-700 mb-3">Record Counts</h5>
+            <h5 className="font-medium text-gray-900 mb-3">Record Counts</h5>
             <div className="space-y-2">
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-600">Order Records:</span>
+                <span className="text-sm text-gray-800">Order Records:</span>
                 <span className="font-medium">{totalOrderRecords.toLocaleString()}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-600">Commission Records:</span>
+                <span className="text-sm text-gray-800">Commission Records:</span>
                 <span className="font-medium">{totalCommissionRecords.toLocaleString()}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-600">Total Records to Link:</span>
+                <span className="text-sm text-gray-800">Total Records to Link:</span>
                 <span className="font-medium text-blue-600">
                   {(totalOrderRecords + totalCommissionRecords).toLocaleString()}
                 </span>
@@ -869,7 +869,7 @@ const LinkingDashboard = ({ linking, onLink }) => {
 
           {/* Right Column - Match Results */}
           <div>
-            <h5 className="font-medium text-gray-700 mb-3">Match Results</h5>
+            <h5 className="font-medium text-gray-900 mb-3">Match Results</h5>
             <div className="space-y-2">
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
                 <span className="text-sm text-green-600">✓ Successful Matches:</span>
@@ -899,8 +899,8 @@ const LinkingDashboard = ({ linking, onLink }) => {
         {/* Progress Bar */}
         <div className="mt-6">
           <div className="flex justify-between items-center mb-2">
-            <span className="text-sm font-medium text-gray-700">Processing Progress</span>
-            <span className="text-sm text-gray-500">
+            <span className="text-sm font-medium text-gray-900">Processing Progress</span>
+            <span className="text-sm text-gray-800">
               {totalOrderRecords > 0 ? Math.round(((linking.statistics.matches + linking.statistics.needsReview + linking.statistics.unmatched) / totalOrderRecords) * 100) : 0}% Complete
             </span>
           </div>
@@ -920,7 +920,7 @@ const LinkingDashboard = ({ linking, onLink }) => {
               ></div>
             </div>
           </div>
-          <div className="flex justify-between text-xs text-gray-500 mt-1">
+          <div className="flex justify-between text-xs text-gray-800 mt-1">
             <span>Matched ({matchRate}%)</span>
             <span>Review ({reviewRate}%)</span>
             <span>Unmatched ({unmatchedRate}%)</span>
@@ -946,17 +946,17 @@ const LinkingDashboard = ({ linking, onLink }) => {
                 <div className="text-center p-3 bg-green-50 rounded-lg">
                   <div className="text-2xl font-bold text-green-600">{highConfidence}</div>
                   <div className="text-sm text-green-700">High Confidence</div>
-                  <div className="text-xs text-green-500">90%+ match score</div>
+                  <div className="text-xs text-green-600">90%+ match score</div>
                 </div>
                 <div className="text-center p-3 bg-yellow-50 rounded-lg">
                   <div className="text-2xl font-bold text-yellow-600">{mediumConfidence}</div>
                   <div className="text-sm text-yellow-700">Medium Confidence</div>
-                  <div className="text-xs text-yellow-500">70-89% match score</div>
+                  <div className="text-xs text-yellow-600">70-89% match score</div>
                 </div>
                 <div className="text-center p-3 bg-orange-50 rounded-lg">
                   <div className="text-2xl font-bold text-orange-600">{lowConfidence}</div>
                   <div className="text-sm text-orange-700">Low Confidence</div>
-                  <div className="text-xs text-orange-500">Below 70% match score</div>
+                  <div className="text-xs text-orange-600">Below 70% match score</div>
                 </div>
               </div>
             );
@@ -978,21 +978,21 @@ const LinkingDashboard = ({ linking, onLink }) => {
                   }`}>
                     {Math.round(match.confidence)}% confidence
                   </span>
-                  <span className="text-xs text-gray-500">Score: {match.matchScore}</span>
+                  <span className="text-xs text-gray-800">Score: {match.matchScore}</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
                   <div>
-                    <p className="text-sm font-medium text-gray-700">Order Record:</p>
+                    <p className="text-sm font-medium text-gray-900">Order Record:</p>
                     <p className="text-sm">{match.orderRecord.Customer || 'N/A'}</p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-gray-700">
                       {match.orderRecord.Provider || 'No Provider'} • 
                       {match.orderRecord['Billing Account Number'] || match.orderRecord.Account || 'No Account'}
                     </p>
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-700">Commission Record:</p>
+                    <p className="text-sm font-medium text-gray-900">Commission Record:</p>
                     <p className="text-sm">{match.commissionRecord.Customer || match.commissionRecord['Provider Customer Name'] || 'N/A'}</p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-gray-700">
                       {match.commissionRecord['Provider Name'] || 'No Provider'} • 
                       {match.commissionRecord['Account Number'] || 'No Account'}
                     </p>
@@ -1114,7 +1114,7 @@ const FieldMappingInterface = ({ state, dispatch }) => {
       
       {/* Mapping Grid */}
       <div className="space-y-4">
-        <div className="grid grid-cols-12 gap-4 text-sm font-medium text-gray-700 pb-2 border-b">
+        <div className="grid grid-cols-12 gap-4 text-sm font-medium text-gray-900 pb-2 border-b">
           <div className="col-span-3">Template Field</div>
           <div className="col-span-3">Source File</div>
           <div className="col-span-3">Source Field</div>
@@ -1269,7 +1269,7 @@ const ExportPreview = ({ state, onExport }) => {
         {Object.entries(previewData || {}).map(([template, data]) => (
           <div key={template} className="border rounded-lg p-4">
             <h4 className="font-semibold capitalize mb-2">{template} Export</h4>
-            <p className="text-sm text-gray-600 mb-3">{data.length} records</p>
+                            <p className="text-sm text-gray-800 mb-3">{data.length} records</p>
             
             {data.length > 0 && (
               <div className="bg-gray-50 rounded p-2 text-xs">
@@ -1277,14 +1277,14 @@ const ExportPreview = ({ state, onExport }) => {
                   {Object.keys(data[0]).slice(0, 4).map(field => (
                     <div key={field} className="flex justify-between">
                       <span className="font-medium">{field}:</span>
-                      <span className="text-gray-600 truncate ml-2">
+                      <span className="text-gray-800 truncate ml-2">
                         {String(data[0][field]).substring(0, 15)}
                         {String(data[0][field]).length > 15 && '...'}
                       </span>
                     </div>
                   ))}
                   {Object.keys(data[0]).length > 4 && (
-                    <div className="text-gray-400">+ {Object.keys(data[0]).length - 4} more fields</div>
+                    <div className="text-gray-600">+ {Object.keys(data[0]).length - 4} more fields</div>
                   )}
                 </div>
               </div>
@@ -1333,7 +1333,7 @@ const StepIndicator = ({ currentStep, totalSteps = 4 }) => {
               {isCompleted ? <CheckCircle className="h-5 w-5" /> : stepNumber}
             </div>
             <span className={`ml-2 text-sm font-medium ${
-              isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-500'
+              isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-800'
             }`}>
               {step}
             </span>
@@ -1506,7 +1506,7 @@ export default function TelecomDataProcessor() {
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             Telecom Data Processor
           </h1>
-          <p className="text-gray-600">
+          <p className="text-gray-800">
             Process and prepare telecom orders and commission statements for database import
           </p>
         </div>
@@ -1590,7 +1590,7 @@ export default function TelecomDataProcessor() {
                     </span>
                   )}
                 </div>
-                <p className="text-sm text-gray-600 mb-4">
+                <p className="text-sm text-gray-800 mb-4">
                   {state.ui.appliedTemplate 
                     ? "Template applied! You can choose a different one or proceed to the next step."
                     : "Click a template to automatically configure linking and field mapping for your provider."
@@ -1617,15 +1617,15 @@ export default function TelecomDataProcessor() {
                                 <CheckCircle className="h-4 w-4 text-green-600 ml-2" />
                               )}
                             </div>
-                            <p className="text-sm text-gray-600 mt-1">{template.description}</p>
+                            <p className="text-sm text-gray-800 mt-1">{template.description}</p>
                             <div className="mt-3 space-y-1">
                               <div className="flex items-center text-xs">
-                                <span className="text-gray-500">Primary Key:</span>
+                                <span className="text-gray-700">Primary Key:</span>
                                 <span className="ml-2 bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
                                   {template.linkingRules.primaryKey}
                                 </span>
                               </div>
-                              <div className="text-xs text-gray-500">
+                              <div className="text-xs text-gray-700">
                                 Strategy: {template.linkingRules.strategy}
                               </div>
                               <div className="text-xs text-green-600">
