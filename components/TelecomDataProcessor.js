@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useContext, createContext, useReducer, useMemo } from 'react';
-import { Upload, FileText, Link, Download, CheckCircle, AlertTriangle, X, Settings, Save, FolderOpen, Eye, ArrowRight, Database, Zap } from 'lucide-react';
+import { Upload, FileText, Link, Download, CheckCircle, AlertTriangle, X, Settings, Save, FolderOpen, Eye, ArrowRight, Database, Zap, Edit3, Plus, Trash2, Copy } from 'lucide-react';
 
 // Enhanced Configuration Templates with complete mappings
 const CONFIGURATION_TEMPLATES = {
@@ -203,8 +203,9 @@ const CONFIGURATION_TEMPLATES = {
     name: "Sandler Standard",
     description: "Configuration for Sandler orders and commissions",
     linkingRules: {
-      strategy: "multi_criteria",
-      primaryKey: "Provider Account #",
+      strategy: "cross_file",
+      primaryKey: "Sandler Order #",
+      secondaryKey: "Account #",
       fallbackKeys: [
         { fields: ["Customer", "Provider"], fuzzyThreshold: 0.85 },
         { fields: ["Customer", "Rep"], fuzzyThreshold: 0.9 }
@@ -239,7 +240,7 @@ const CONFIGURATION_TEMPLATES = {
         "Carrier": { source: "orders", field: "Provider", transform: "normalize" },
         "Status": { source: "orders", field: "Status", transform: "normalize" },
         "Owner": { source: "commissions", field: "Rep", transform: "titleCase" },
-        "Account Number": { source: "orders", field: "Provider Account #", transform: "normalize" },
+        "Account Number": { source: "commissions", field: "Account #", transform: "normalize" },
         "Install Date": { source: "commissions", field: "Install Date", transform: "date" },
         "Product Description": { source: "commissions", field: "Product", transform: "normalize" }
       }
@@ -404,7 +405,10 @@ const initialState = {
   ui: {
     loading: false,
     error: null,
-    activeTemplate: 'customer'
+    activeTemplate: 'customer',
+    showTemplateEditor: false,
+    editingTemplate: null,
+    customTemplates: {}
   }
 };
 
@@ -450,6 +454,17 @@ function appReducer(state, action) {
         ...state,
         ui: { ...state.ui, ...action.payload }
       };
+    case 'UPDATE_TEMPLATE':
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          customTemplates: {
+            ...state.ui.customTemplates,
+            [action.templateKey]: action.template
+          }
+        }
+      };
     default:
       return state;
   }
@@ -460,9 +475,46 @@ const parseCSV = (csvText) => {
   const lines = csvText.split('\n').filter(line => line.trim());
   if (lines.length === 0) return { headers: [], data: [] };
   
-  const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+  // Proper CSV parsing that handles quoted fields with commas
+  const parseCSVLine = (line) => {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    let i = 0;
+    
+    while (i < line.length) {
+      const char = line[i];
+      
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          // Handle escaped quotes ("")
+          current += '"';
+          i += 2;
+        } else {
+          // Toggle quote state
+          inQuotes = !inQuotes;
+          i++;
+        }
+      } else if (char === ',' && !inQuotes) {
+        // Field separator found outside quotes
+        result.push(current.trim());
+        current = '';
+        i++;
+      } else {
+        current += char;
+        i++;
+      }
+    }
+    
+    // Add the last field
+    result.push(current.trim());
+    
+    return result;
+  };
+  
+  const headers = parseCSVLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
   const data = lines.slice(1).map(line => {
-    const values = line.split(',').map(v => v.replace(/"/g, '').trim());
+    const values = parseCSVLine(line).map(v => v.replace(/^"|"$/g, '').trim());
     const row = {};
     headers.forEach((header, index) => {
       row[header] = values[index] || '';
@@ -527,6 +579,27 @@ const linkRecords = (ordersData, commissionsData, linkingRules) => {
     
     return (1 - editDistance / longer.length) >= threshold;
   };
+
+  // Enhanced linking logic that supports cross-file matching
+  const tryDirectMatch = (order, commission, primaryKey, secondaryKey) => {
+    // Handle cross-file linking (e.g., Sandler Order # to Account #)
+    if (linkingRules.strategy === 'cross_file' && primaryKey && secondaryKey) {
+      const primaryValue = order[primaryKey] || commission[primaryKey];
+      const secondaryValue = order[secondaryKey] || commission[secondaryKey];
+      
+      if (primaryValue && secondaryValue && String(primaryValue) === String(secondaryValue)) {
+        return { score: 100, reason: `Cross-file match: ${primaryKey} = ${secondaryKey}` };
+      }
+    }
+    
+    // Standard direct matches
+    if (order[primaryKey] && commission[primaryKey] && 
+        String(order[primaryKey]) === String(commission[primaryKey])) {
+      return { score: 100, reason: `${primaryKey} exact match` };
+    }
+    
+    return null;
+  };
   
   // Try multiple linking strategies
   ordersData.forEach(order => {
@@ -536,14 +609,27 @@ const linkRecords = (ordersData, commissionsData, linkingRules) => {
       let score = 0;
       const reasons = [];
       
-      // 1. Try Order ID exact match (highest priority)
-      if (order['Order ID'] && commission['Order ID'] && 
+      // 1. Try primary key matching (including cross-file)
+      const directMatch = tryDirectMatch(
+        order, 
+        commission, 
+        linkingRules.primaryKey, 
+        linkingRules.secondaryKey
+      );
+      
+      if (directMatch) {
+        score += directMatch.score;
+        reasons.push(directMatch.reason);
+      }
+      
+      // 2. Try Order ID exact match (fallback for compatibility)
+      if (!directMatch && order['Order ID'] && commission['Order ID'] && 
           String(order['Order ID']) === String(commission['Order ID'])) {
         score += 100;
         reasons.push('Order ID exact match');
       }
       
-      // 2. Try customer name matching
+      // 3. Try customer name matching
       if (order.Customer && commission.Customer) {
         if (fuzzyMatch(order.Customer, commission.Customer, 0.9)) {
           score += 50;
@@ -554,35 +640,55 @@ const linkRecords = (ordersData, commissionsData, linkingRules) => {
         }
       }
       
-      // 3. Try provider matching
+      // 4. Try provider matching
       if (order.Provider && commission['Provider Name']) {
         if (fuzzyMatch(order.Provider, commission['Provider Name'], 0.8)) {
           score += 30;
           reasons.push('Provider match');
         }
+      } else if (order.Provider && commission.Provider) {
+        if (fuzzyMatch(order.Provider, commission.Provider, 0.8)) {
+          score += 30;
+          reasons.push('Provider match');
+        }
       }
       
-      // 4. Try account number matching
+      // 5. Try account number matching
       if (order['Billing Account Number'] && commission['Account Number']) {
         if (String(order['Billing Account Number']) === String(commission['Account Number'])) {
           score += 40;
           reasons.push('Account number match');
         }
+      } else if (order['Provider Account #'] && commission['Account #']) {
+        if (String(order['Provider Account #']) === String(commission['Account #'])) {
+          score += 40;
+          reasons.push('Provider account match');
+        }
       }
       
-      // 5. Try sales rep matching
+      // 6. Try sales rep matching
       if (order['Sales Rep'] && commission['Sales Rep']) {
         if (fuzzyMatch(order['Sales Rep'], commission['Sales Rep'], 0.9)) {
           score += 20;
           reasons.push('Sales rep match');
         }
+      } else if (order['Sales Rep'] && commission.Rep) {
+        if (fuzzyMatch(order['Sales Rep'], commission.Rep, 0.9)) {
+          score += 20;
+          reasons.push('Rep match');
+        }
       }
       
-      // 6. Location/Address matching
+      // 7. Location/Address matching
       if (order.Location && commission['Site Address']) {
         if (fuzzyMatch(order.Location, commission['Site Address'], 0.7)) {
           score += 25;
           reasons.push('Location match');
+        }
+      } else if (order.Address && commission.Address) {
+        if (fuzzyMatch(order.Address, commission.Address, 0.7)) {
+          score += 25;
+          reasons.push('Address match');
         }
       }
       
@@ -649,6 +755,416 @@ const linkRecords = (ordersData, commissionsData, linkingRules) => {
   };
 };
 
+// Template Editor Component
+const TemplateEditor = ({ template, templateKey, onSave, onCancel, availableFields }) => {
+  const [editedTemplate, setEditedTemplate] = useState(JSON.parse(JSON.stringify(template)));
+  const [activeTab, setActiveTab] = useState('general');
+  const [errors, setErrors] = useState({});
+
+  const validateTemplate = () => {
+    const newErrors = {};
+    
+    if (!editedTemplate.name.trim()) {
+      newErrors.name = 'Template name is required';
+    }
+    
+    if (!editedTemplate.linkingRules.primaryKey.trim()) {
+      newErrors.primaryKey = 'Primary key is required';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSave = () => {
+    if (validateTemplate()) {
+      onSave(templateKey, editedTemplate);
+    }
+  };
+
+  const updateLinkingRule = (field, value) => {
+    setEditedTemplate(prev => ({
+      ...prev,
+      linkingRules: {
+        ...prev.linkingRules,
+        [field]: value
+      }
+    }));
+  };
+
+  const updateFieldMapping = (exportTemplate, templateField, source, field, transform = 'normalize') => {
+    setEditedTemplate(prev => ({
+      ...prev,
+      fieldMappings: {
+        ...prev.fieldMappings,
+        [exportTemplate]: {
+          ...prev.fieldMappings[exportTemplate],
+          [templateField]: { source, field, transform }
+        }
+      }
+    }));
+  };
+
+  const removeFieldMapping = (exportTemplate, templateField) => {
+    setEditedTemplate(prev => {
+      const newMappings = { ...prev.fieldMappings[exportTemplate] };
+      delete newMappings[templateField];
+      return {
+        ...prev,
+        fieldMappings: {
+          ...prev.fieldMappings,
+          [exportTemplate]: newMappings
+        }
+      };
+    });
+  };
+
+  const addFallbackKey = () => {
+    setEditedTemplate(prev => ({
+      ...prev,
+      linkingRules: {
+        ...prev.linkingRules,
+        fallbackKeys: [
+          ...(prev.linkingRules.fallbackKeys || []),
+          { fields: [''], fuzzyThreshold: 0.85 }
+        ]
+      }
+    }));
+  };
+
+  const updateFallbackKey = (index, field, value) => {
+    setEditedTemplate(prev => {
+      const newFallbackKeys = [...prev.linkingRules.fallbackKeys];
+      if (field === 'fields') {
+        newFallbackKeys[index].fields = [value];
+      } else {
+        newFallbackKeys[index][field] = value;
+      }
+      return {
+        ...prev,
+        linkingRules: {
+          ...prev.linkingRules,
+          fallbackKeys: newFallbackKeys
+        }
+      };
+    });
+  };
+
+  const removeFallbackKey = (index) => {
+    setEditedTemplate(prev => ({
+      ...prev,
+      linkingRules: {
+        ...prev.linkingRules,
+        fallbackKeys: prev.linkingRules.fallbackKeys.filter((_, i) => i !== index)
+      }
+    }));
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
+        {/* Header */}
+        <div className="flex justify-between items-center p-6 border-b">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Edit Template</h2>
+            <p className="text-gray-600">Configure linking rules and field mappings</p>
+          </div>
+          <button
+            onClick={onCancel}
+            className="text-gray-400 hover:text-gray-600"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="border-b">
+          <div className="flex space-x-8 px-6">
+            {['general', 'linking', 'mapping'].map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`py-3 px-1 border-b-2 font-medium text-sm capitalize ${
+                  activeTab === tab
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {tab} {tab === 'general' ? 'Settings' : tab === 'linking' ? 'Rules' : 'Configuration'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 overflow-y-auto max-h-[60vh]">
+          {/* General Tab */}
+          {activeTab === 'general' && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Template Name
+                </label>
+                <input
+                  type="text"
+                  value={editedTemplate.name}
+                  onChange={(e) => setEditedTemplate(prev => ({ ...prev, name: e.target.value }))}
+                  className={`w-full p-3 border rounded-lg ${errors.name ? 'border-red-300' : 'border-gray-300'}`}
+                  placeholder="Enter template name"
+                />
+                {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name}</p>}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Description
+                </label>
+                <textarea
+                  value={editedTemplate.description}
+                  onChange={(e) => setEditedTemplate(prev => ({ ...prev, description: e.target.value }))}
+                  className="w-full p-3 border border-gray-300 rounded-lg"
+                  rows="3"
+                  placeholder="Describe this template's purpose and use case"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Linking Tab */}
+          {activeTab === 'linking' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Primary Key Field
+                  </label>
+                  <div className="space-y-2">
+                    <select
+                      value={editedTemplate.linkingRules.primaryKey}
+                      onChange={(e) => updateLinkingRule('primaryKey', e.target.value)}
+                      className={`w-full p-3 border rounded-lg ${errors.primaryKey ? 'border-red-300' : 'border-gray-300'}`}
+                    >
+                      <option value="">Select primary key...</option>
+                      <optgroup label="Orders File Fields">
+                        {availableFields.orders.map(field => (
+                          <option key={field} value={field}>{field}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Commissions File Fields">
+                        {availableFields.commissions.map(field => (
+                          <option key={field} value={field}>{field}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    <p className="text-xs text-gray-500">
+                      Choose the field that will be used as the primary identifier for linking records
+                    </p>
+                  </div>
+                  {errors.primaryKey && <p className="text-red-500 text-sm mt-1">{errors.primaryKey}</p>}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Secondary Key Field (Optional)
+                  </label>
+                  <div className="space-y-2">
+                    <select
+                      value={editedTemplate.linkingRules.secondaryKey || ''}
+                      onChange={(e) => updateLinkingRule('secondaryKey', e.target.value)}
+                      className="w-full p-3 border border-gray-300 rounded-lg"
+                    >
+                      <option value="">Select secondary key...</option>
+                      <optgroup label="Orders File Fields">
+                        {availableFields.orders.map(field => (
+                          <option key={field} value={field}>{field}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Commissions File Fields">
+                        {availableFields.commissions.map(field => (
+                          <option key={field} value={field}>{field}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    <p className="text-xs text-gray-500">
+                      Optional: Field from the other file that should match the primary key
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Linking Strategy
+                </label>
+                <select
+                  value={editedTemplate.linkingRules.strategy}
+                  onChange={(e) => updateLinkingRule('strategy', e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg"
+                >
+                  <option value="exact">Exact Match</option>
+                  <option value="multi_criteria">Multi-Criteria</option>
+                  <option value="tiered">Tiered Matching</option>
+                  <option value="cross_file">Cross-File Linking</option>
+                </select>
+              </div>
+
+              {/* Fallback Keys */}
+              <div>
+                <div className="flex justify-between items-center mb-3">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Fallback Matching Rules
+                  </label>
+                  <button
+                    onClick={addFallbackKey}
+                    className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600"
+                  >
+                    <Plus className="h-4 w-4 inline mr-1" />
+                    Add Rule
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {(editedTemplate.linkingRules.fallbackKeys || []).map((rule, index) => (
+                    <div key={index} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+                      <select
+                        value={rule.fields[0] || ''}
+                        onChange={(e) => updateFallbackKey(index, 'fields', e.target.value)}
+                        className="flex-1 p-2 border border-gray-300 rounded"
+                      >
+                        <option value="">Select field...</option>
+                        <optgroup label="Orders File Fields">
+                          {availableFields.orders.map(field => (
+                            <option key={field} value={field}>{field}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Commissions File Fields">
+                          {availableFields.commissions.map(field => (
+                            <option key={field} value={field}>{field}</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-600">Threshold:</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={rule.fuzzyThreshold}
+                          onChange={(e) => updateFallbackKey(index, 'fuzzyThreshold', parseFloat(e.target.value))}
+                          className="w-20 p-2 border border-gray-300 rounded"
+                        />
+                      </div>
+                      <button
+                        onClick={() => removeFallbackKey(index)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Mapping Tab */}
+          {activeTab === 'mapping' && (
+            <div className="space-y-6">
+              {Object.keys(EXPORT_TEMPLATES).map(exportTemplate => (
+                <div key={exportTemplate} className="border rounded-lg p-4">
+                  <h4 className="text-lg font-semibold capitalize mb-4">{exportTemplate} Template</h4>
+                  <div className="space-y-3">
+                    {EXPORT_TEMPLATES[exportTemplate].map(templateField => {
+                      const mapping = editedTemplate.fieldMappings[exportTemplate]?.[templateField];
+                      return (
+                        <div key={templateField} className="grid grid-cols-12 gap-3 items-center">
+                          <div className="col-span-3 text-sm font-medium">{templateField}</div>
+                          <div className="col-span-3">
+                            <select
+                              value={mapping?.source || ''}
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  updateFieldMapping(exportTemplate, templateField, e.target.value, mapping?.field || '', mapping?.transform || 'normalize');
+                                }
+                              }}
+                              className="w-full p-2 border rounded text-sm"
+                            >
+                              <option value="">Select source...</option>
+                              <option value="orders">Orders File</option>
+                              <option value="commissions">Commissions File</option>
+                            </select>
+                          </div>
+                          <div className="col-span-3">
+                            <select
+                              value={mapping?.field || ''}
+                              onChange={(e) => updateFieldMapping(exportTemplate, templateField, mapping?.source || 'orders', e.target.value, mapping?.transform || 'normalize')}
+                              className="w-full p-2 border rounded text-sm"
+                              disabled={!mapping?.source}
+                            >
+                              <option value="">Select field...</option>
+                              {mapping?.source === 'orders' && availableFields.orders.map(header => (
+                                <option key={header} value={header}>{header}</option>
+                              ))}
+                              {mapping?.source === 'commissions' && availableFields.commissions.map(header => (
+                                <option key={header} value={header}>{header}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="col-span-2">
+                            <select
+                              value={mapping?.transform || 'normalize'}
+                              onChange={(e) => updateFieldMapping(exportTemplate, templateField, mapping?.source || 'orders', mapping?.field || '', e.target.value)}
+                              className="w-full p-2 border rounded text-sm"
+                              disabled={!mapping?.field}
+                            >
+                              <option value="normalize">Normalize</option>
+                              <option value="titleCase">Title Case</option>
+                              <option value="upperCase">Upper Case</option>
+                              <option value="currency">Currency</option>
+                              <option value="date">Date</option>
+                            </select>
+                          </div>
+                          <div className="col-span-1">
+                            {mapping?.field && (
+                              <button
+                                onClick={() => removeFieldMapping(exportTemplate, templateField)}
+                                className="text-red-500 hover:text-red-700"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end space-x-3 p-6 border-t bg-gray-50">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-gray-700 bg-gray-200 rounded hover:bg-gray-300"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            <Save className="h-4 w-4 inline mr-2" />
+            Save Template
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Components
 const FileUploadZone = ({ onFileUpload, fileType, currentFile }) => {
   const [dragActive, setDragActive] = useState(false);
@@ -701,7 +1217,7 @@ const FileUploadZone = ({ onFileUpload, fileType, currentFile }) => {
         >
           <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
           <p className="text-lg font-medium mb-2">Drop {fileType} CSV file here</p>
-          <p className="text-gray-800 mb-4">or</p>
+          <p className="text-gray-500 mb-4">or</p>
           <input
             type="file"
             accept=".csv"
@@ -715,7 +1231,7 @@ const FileUploadZone = ({ onFileUpload, fileType, currentFile }) => {
           >
             Browse Files
           </label>
-          <p className="text-xs text-gray-700 mt-2">Supports CSV files up to 25MB</p>
+          <p className="text-xs text-gray-400 mt-2">Supports CSV files up to 25MB</p>
         </div>
       ) : (
         <div className="border rounded-lg p-4 bg-green-50">
@@ -724,7 +1240,7 @@ const FileUploadZone = ({ onFileUpload, fileType, currentFile }) => {
               <FileText className="h-5 w-5 text-green-600 mr-2" />
               <div>
                 <p className="font-medium">{currentFile.filename}</p>
-                <p className="text-sm text-gray-800">
+                <p className="text-sm text-gray-500">
                   {currentFile.data.length.toLocaleString()} rows, {currentFile.headers.length} columns
                 </p>
               </div>
@@ -848,18 +1364,18 @@ const LinkingDashboard = ({ linking, onLink }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Left Column - Record Counts */}
           <div>
-            <h5 className="font-medium text-gray-900 mb-3">Record Counts</h5>
+            <h5 className="font-medium text-gray-700 mb-3">Record Counts</h5>
             <div className="space-y-2">
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-800">Order Records:</span>
+                <span className="text-sm text-gray-600">Order Records:</span>
                 <span className="font-medium">{totalOrderRecords.toLocaleString()}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-800">Commission Records:</span>
+                <span className="text-sm text-gray-600">Commission Records:</span>
                 <span className="font-medium">{totalCommissionRecords.toLocaleString()}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-800">Total Records to Link:</span>
+                <span className="text-sm text-gray-600">Total Records to Link:</span>
                 <span className="font-medium text-blue-600">
                   {(totalOrderRecords + totalCommissionRecords).toLocaleString()}
                 </span>
@@ -869,7 +1385,7 @@ const LinkingDashboard = ({ linking, onLink }) => {
 
           {/* Right Column - Match Results */}
           <div>
-            <h5 className="font-medium text-gray-900 mb-3">Match Results</h5>
+            <h5 className="font-medium text-gray-700 mb-3">Match Results</h5>
             <div className="space-y-2">
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
                 <span className="text-sm text-green-600">✓ Successful Matches:</span>
@@ -899,8 +1415,8 @@ const LinkingDashboard = ({ linking, onLink }) => {
         {/* Progress Bar */}
         <div className="mt-6">
           <div className="flex justify-between items-center mb-2">
-            <span className="text-sm font-medium text-gray-900">Processing Progress</span>
-            <span className="text-sm text-gray-800">
+            <span className="text-sm font-medium text-gray-700">Processing Progress</span>
+            <span className="text-sm text-gray-500">
               {totalOrderRecords > 0 ? Math.round(((linking.statistics.matches + linking.statistics.needsReview + linking.statistics.unmatched) / totalOrderRecords) * 100) : 0}% Complete
             </span>
           </div>
@@ -920,7 +1436,7 @@ const LinkingDashboard = ({ linking, onLink }) => {
               ></div>
             </div>
           </div>
-          <div className="flex justify-between text-xs text-gray-800 mt-1">
+          <div className="flex justify-between text-xs text-gray-500 mt-1">
             <span>Matched ({matchRate}%)</span>
             <span>Review ({reviewRate}%)</span>
             <span>Unmatched ({unmatchedRate}%)</span>
@@ -943,20 +1459,10 @@ const LinkingDashboard = ({ linking, onLink }) => {
             
             return (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="text-center p-3 bg-green-50 rounded-lg">
-                  <div className="text-2xl font-bold text-green-600">{highConfidence}</div>
-                  <div className="text-sm text-green-700">High Confidence</div>
-                  <div className="text-xs text-green-600">90%+ match score</div>
-                </div>
-                <div className="text-center p-3 bg-yellow-50 rounded-lg">
-                  <div className="text-2xl font-bold text-yellow-600">{mediumConfidence}</div>
-                  <div className="text-sm text-yellow-700">Medium Confidence</div>
-                  <div className="text-xs text-yellow-600">70-89% match score</div>
-                </div>
                 <div className="text-center p-3 bg-orange-50 rounded-lg">
                   <div className="text-2xl font-bold text-orange-600">{lowConfidence}</div>
                   <div className="text-sm text-orange-700">Low Confidence</div>
-                  <div className="text-xs text-orange-600">Below 70% match score</div>
+                  <div className="text-xs text-orange-500">Below 70% match score</div>
                 </div>
               </div>
             );
@@ -978,21 +1484,21 @@ const LinkingDashboard = ({ linking, onLink }) => {
                   }`}>
                     {Math.round(match.confidence)}% confidence
                   </span>
-                  <span className="text-xs text-gray-800">Score: {match.matchScore}</span>
+                  <span className="text-xs text-gray-500">Score: {match.matchScore}</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
                   <div>
-                    <p className="text-sm font-medium text-gray-900">Order Record:</p>
+                    <p className="text-sm font-medium text-gray-700">Order Record:</p>
                     <p className="text-sm">{match.orderRecord.Customer || 'N/A'}</p>
-                    <p className="text-xs text-gray-700">
+                    <p className="text-xs text-gray-500">
                       {match.orderRecord.Provider || 'No Provider'} • 
                       {match.orderRecord['Billing Account Number'] || match.orderRecord.Account || 'No Account'}
                     </p>
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">Commission Record:</p>
+                    <p className="text-sm font-medium text-gray-700">Commission Record:</p>
                     <p className="text-sm">{match.commissionRecord.Customer || match.commissionRecord['Provider Customer Name'] || 'N/A'}</p>
-                    <p className="text-xs text-gray-700">
+                    <p className="text-xs text-gray-500">
                       {match.commissionRecord['Provider Name'] || 'No Provider'} • 
                       {match.commissionRecord['Account Number'] || 'No Account'}
                     </p>
@@ -1009,15 +1515,127 @@ const LinkingDashboard = ({ linking, onLink }) => {
       
       {linking.conflicts && linking.conflicts.length > 0 && (
         <div>
-          <h4 className="text-lg font-semibold mb-3 text-yellow-700">Conflicts Requiring Review</h4>
-          <div className="space-y-3">
-            {linking.conflicts.slice(0, 3).map((conflict, idx) => (
-              <div key={idx} className="border rounded-lg p-4 bg-yellow-50">
-                <p className="text-sm font-medium text-yellow-800 mb-2">
-                  Order: {conflict.orderRecord.Customer} has {conflict.commissionRecords.length} potential matches
-                </p>
-                <div className="text-xs text-yellow-700">
-                  Scores: {conflict.scores?.join(', ') || 'Multiple similar matches'}
+          <h4 className="text-lg font-semibold mb-3 flex items-center">
+            <AlertTriangle className="h-5 w-5 text-yellow-600 mr-2" />
+            Records Requiring Review ({linking.conflicts.length})
+          </h4>
+          <div className="space-y-4">
+            {linking.conflicts.map((conflict, idx) => (
+              <div key={idx} className="border border-yellow-200 rounded-lg p-4 bg-yellow-50">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center">
+                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-medium mr-2">
+                      NEEDS REVIEW
+                    </span>
+                    <span className="text-sm font-medium text-yellow-800">
+                      {conflict.commissionRecords?.length || 'Multiple'} potential matches found
+                    </span>
+                  </div>
+                  <span className="text-xs text-yellow-600 capitalize">
+                    {conflict.issue?.replace(/_/g, ' ') || 'Multiple matches'}
+                  </span>
+                </div>
+                
+                {/* Order Record */}
+                <div className="mb-4 p-3 bg-white rounded border">
+                  <p className="text-sm font-medium text-gray-700 mb-2">📋 Order Record to Match:</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                    <div>
+                      <span className="font-medium text-gray-600">Customer:</span>
+                      <p className="text-gray-900">{conflict.orderRecord.Customer || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-600">Provider:</span>
+                      <p className="text-gray-900">{conflict.orderRecord.Provider || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-600">Account:</span>
+                      <p className="text-gray-900">
+                        {conflict.orderRecord['Billing Account Number'] || 
+                         conflict.orderRecord['Provider Account #'] || 
+                         conflict.orderRecord.Account || 'N/A'}
+                      </p>
+                    </div>
+                  </div>
+                  {conflict.orderRecord['Sales Rep'] && (
+                    <div className="mt-2 text-sm">
+                      <span className="font-medium text-gray-600">Sales Rep:</span>
+                      <span className="ml-1 text-gray-900">{conflict.orderRecord['Sales Rep']}</span>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Potential Commission Matches */}
+                <div>
+                  <p className="text-sm font-medium text-gray-700 mb-3">💰 Potential Commission Matches:</p>
+                  <div className="space-y-3">
+                    {conflict.commissionRecords?.slice(0, 3).map((commissionRecord, matchIdx) => (
+                      <div key={matchIdx} className="p-3 bg-white rounded border border-gray-200">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-medium text-blue-600">
+                            Match Option #{matchIdx + 1}
+                          </span>
+                          {conflict.scores && conflict.scores[matchIdx] && (
+                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                              Score: {conflict.scores[matchIdx]}
+                            </span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                          <div>
+                            <span className="font-medium text-gray-600">Customer:</span>
+                            <p className="text-gray-900">
+                              {commissionRecord.Customer || 
+                               commissionRecord['Provider Customer Name'] || 'N/A'}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="font-medium text-gray-600">Provider:</span>
+                            <p className="text-gray-900">
+                              {commissionRecord['Provider Name'] || 
+                               commissionRecord.Provider || 'N/A'}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="font-medium text-gray-600">Account:</span>
+                            <p className="text-gray-900">
+                              {commissionRecord['Account Number'] || 
+                               commissionRecord['Account #'] || 
+                               commissionRecord.Account || 'N/A'}
+                            </p>
+                          </div>
+                        </div>
+                        {(commissionRecord.Rep || commissionRecord['Sales Rep']) && (
+                          <div className="mt-2 text-sm">
+                            <span className="font-medium text-gray-600">Rep:</span>
+                            <span className="ml-1 text-gray-900">
+                              {commissionRecord.Rep || commissionRecord['Sales Rep']}
+                            </span>
+                          </div>
+                        )}
+                        {commissionRecord['Comp Paid'] && (
+                          <div className="mt-2 text-sm">
+                            <span className="font-medium text-gray-600">Commission:</span>
+                            <span className="ml-1 text-green-600 font-medium">
+                              ${commissionRecord['Comp Paid']}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )) || (
+                      <div className="p-3 bg-gray-50 rounded text-sm text-gray-600 italic">
+                        No detailed match information available
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Action needed */}
+                <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded">
+                  <p className="text-sm text-amber-800">
+                    <strong>Action Required:</strong> Manual review needed to determine the correct match. 
+                    Consider updating linking rules or manually matching these records.
+                  </p>
                 </div>
               </div>
             ))}
@@ -1114,7 +1732,7 @@ const FieldMappingInterface = ({ state, dispatch }) => {
       
       {/* Mapping Grid */}
       <div className="space-y-4">
-        <div className="grid grid-cols-12 gap-4 text-sm font-medium text-gray-900 pb-2 border-b">
+        <div className="grid grid-cols-12 gap-4 text-sm font-medium text-gray-700 pb-2 border-b">
           <div className="col-span-3">Template Field</div>
           <div className="col-span-3">Source File</div>
           <div className="col-span-3">Source Field</div>
@@ -1269,7 +1887,7 @@ const ExportPreview = ({ state, onExport }) => {
         {Object.entries(previewData || {}).map(([template, data]) => (
           <div key={template} className="border rounded-lg p-4">
             <h4 className="font-semibold capitalize mb-2">{template} Export</h4>
-                            <p className="text-sm text-gray-800 mb-3">{data.length} records</p>
+            <p className="text-sm text-gray-600 mb-3">{data.length} records</p>
             
             {data.length > 0 && (
               <div className="bg-gray-50 rounded p-2 text-xs">
@@ -1277,14 +1895,14 @@ const ExportPreview = ({ state, onExport }) => {
                   {Object.keys(data[0]).slice(0, 4).map(field => (
                     <div key={field} className="flex justify-between">
                       <span className="font-medium">{field}:</span>
-                      <span className="text-gray-800 truncate ml-2">
+                      <span className="text-gray-600 truncate ml-2">
                         {String(data[0][field]).substring(0, 15)}
                         {String(data[0][field]).length > 15 && '...'}
                       </span>
                     </div>
                   ))}
                   {Object.keys(data[0]).length > 4 && (
-                    <div className="text-gray-600">+ {Object.keys(data[0]).length - 4} more fields</div>
+                    <div className="text-gray-400">+ {Object.keys(data[0]).length - 4} more fields</div>
                   )}
                 </div>
               </div>
@@ -1333,7 +1951,7 @@ const StepIndicator = ({ currentStep, totalSteps = 4 }) => {
               {isCompleted ? <CheckCircle className="h-5 w-5" /> : stepNumber}
             </div>
             <span className={`ml-2 text-sm font-medium ${
-              isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-800'
+              isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-500'
             }`}>
               {step}
             </span>
@@ -1391,9 +2009,12 @@ export default function TelecomDataProcessor() {
   };
   
   const applyTemplate = (templateKey, template, isAutoApplied = false) => {
+    // Use custom template if it exists
+    const templateToUse = state.ui.customTemplates[templateKey] || template;
+    
     // Apply field mappings from template
-    if (template.fieldMappings) {
-      Object.entries(template.fieldMappings).forEach(([templateType, mappings]) => {
+    if (templateToUse.fieldMappings) {
+      Object.entries(templateToUse.fieldMappings).forEach(([templateType, mappings]) => {
         dispatch({ 
           type: 'SET_MAPPING', 
           template: templateType, 
@@ -1407,7 +2028,7 @@ export default function TelecomDataProcessor() {
       type: 'SET_UI_STATE', 
       payload: { 
         appliedTemplate: templateKey,
-        templateConfig: template,
+        templateConfig: templateToUse,
         isAutoApplied: isAutoApplied
       } 
     });
@@ -1419,6 +2040,53 @@ export default function TelecomDataProcessor() {
         payload: { appliedTemplate: null, isAutoApplied: false } 
       });
     }, isAutoApplied ? 8000 : 5000);
+  };
+
+  const handleEditTemplate = (templateKey) => {
+    const baseTemplate = CONFIGURATION_TEMPLATES[templateKey];
+    const customTemplate = state.ui.customTemplates[templateKey];
+    const templateToEdit = customTemplate || baseTemplate;
+    
+    dispatch({ 
+      type: 'SET_UI_STATE', 
+      payload: { 
+        showTemplateEditor: true,
+        editingTemplate: { key: templateKey, template: templateToEdit }
+      } 
+    });
+  };
+
+  const handleSaveTemplate = (templateKey, editedTemplate) => {
+    dispatch({ 
+      type: 'UPDATE_TEMPLATE', 
+      templateKey, 
+      template: editedTemplate 
+    });
+    
+    dispatch({ 
+      type: 'SET_UI_STATE', 
+      payload: { 
+        showTemplateEditor: false,
+        editingTemplate: null
+      } 
+    });
+  };
+
+  const handleCancelEdit = () => {
+    dispatch({ 
+      type: 'SET_UI_STATE', 
+      payload: { 
+        showTemplateEditor: false,
+        editingTemplate: null
+      } 
+    });
+  };
+
+  const getAvailableFields = () => {
+    return {
+      orders: state.files.orders.headers || [],
+      commissions: state.files.commissions.headers || []
+    };
   };
   
   const handleLinkData = () => {
@@ -1506,7 +2174,7 @@ export default function TelecomDataProcessor() {
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             Telecom Data Processor
           </h1>
-          <p className="text-gray-800">
+          <p className="text-gray-600">
             Process and prepare telecom orders and commission statements for database import
           </p>
         </div>
@@ -1590,7 +2258,7 @@ export default function TelecomDataProcessor() {
                     </span>
                   )}
                 </div>
-                <p className="text-sm text-gray-800 mb-4">
+                <p className="text-sm text-gray-600 mb-4">
                   {state.ui.appliedTemplate 
                     ? "Template applied! You can choose a different one or proceed to the next step."
                     : "Click a template to automatically configure linking and field mapping for your provider."
@@ -1599,53 +2267,82 @@ export default function TelecomDataProcessor() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {Object.entries(CONFIGURATION_TEMPLATES).map(([key, template]) => {
                     const isSelected = state.ui.appliedTemplate === key;
+                    const isCustomized = !!state.ui.customTemplates[key];
+                    const displayTemplate = state.ui.customTemplates[key] || template;
+                    
                     return (
                       <div 
                         key={key} 
-                        className={`border rounded-lg p-4 cursor-pointer transition-all duration-200 ${
+                        className={`border rounded-lg p-4 transition-all duration-200 ${
                           isSelected 
                             ? 'bg-green-50 border-green-300 ring-2 ring-green-200' 
                             : 'hover:bg-blue-50 hover:border-blue-300'
                         }`}
-                        onClick={() => applyTemplate(key, template)}
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center">
-                              <h4 className="font-medium text-gray-900">{template.name}</h4>
+                              <h4 className="font-medium text-gray-900">{displayTemplate.name}</h4>
                               {isSelected && (
                                 <CheckCircle className="h-4 w-4 text-green-600 ml-2" />
                               )}
+                              {isCustomized && (
+                                <Edit3 className="h-3 w-3 text-blue-600 ml-1" title="Customized" />
+                              )}
                             </div>
-                            <p className="text-sm text-gray-800 mt-1">{template.description}</p>
+                            <p className="text-sm text-gray-600 mt-1">{displayTemplate.description}</p>
                             <div className="mt-3 space-y-1">
                               <div className="flex items-center text-xs">
-                                <span className="text-gray-700">Primary Key:</span>
+                                <span className="text-gray-500">Primary Key:</span>
                                 <span className="ml-2 bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
-                                  {template.linkingRules.primaryKey}
+                                  {displayTemplate.linkingRules.primaryKey}
                                 </span>
                               </div>
-                              <div className="text-xs text-gray-700">
-                                Strategy: {template.linkingRules.strategy}
+                              <div className="text-xs text-gray-500">
+                                Strategy: {displayTemplate.linkingRules.strategy}
+                                {isCustomized && <span className="ml-2 text-blue-600">(Modified)</span>}
                               </div>
                               <div className="text-xs text-green-600">
-                                {Object.keys(template.fieldMappings).length} templates configured
+                                {Object.keys(displayTemplate.fieldMappings).length} templates configured
                               </div>
                             </div>
                           </div>
-                          <div className="ml-2">
+                          <div className="ml-2 flex flex-col items-center space-y-2">
                             <div className={`w-3 h-3 rounded-full ${
                               isSelected ? 'bg-green-500' : 'bg-green-400'
                             }`}></div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditTemplate(key);
+                              }}
+                              className="text-gray-400 hover:text-blue-600 transition-colors"
+                              title="Edit Template"
+                            >
+                              <Settings className="h-4 w-4" />
+                            </button>
                           </div>
                         </div>
-                        <div className="mt-3 pt-3 border-t border-gray-100">
-                          <button className={`text-xs px-3 py-1 rounded transition-colors ${
-                            isSelected 
-                              ? 'bg-green-500 text-white hover:bg-green-600' 
-                              : 'bg-blue-500 text-white hover:bg-blue-600'
-                          }`}>
+                        <div className="mt-3 pt-3 border-t border-gray-100 flex space-x-2">
+                          <button 
+                            onClick={() => applyTemplate(key, template)}
+                            className={`flex-1 text-xs px-3 py-1 rounded transition-colors ${
+                              isSelected 
+                                ? 'bg-green-500 text-white hover:bg-green-600' 
+                                : 'bg-blue-500 text-white hover:bg-blue-600'
+                            }`}
+                          >
                             {isSelected ? 'Selected' : 'Apply Template'}
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditTemplate(key);
+                            }}
+                            className="text-xs px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors"
+                            title="Edit Template"
+                          >
+                            <Edit3 className="h-3 w-3" />
                           </button>
                         </div>
                       </div>
@@ -1700,6 +2397,17 @@ export default function TelecomDataProcessor() {
             </div>
           )}
         </div>
+        
+        {/* Template Editor Modal */}
+        {state.ui.showTemplateEditor && state.ui.editingTemplate && (
+          <TemplateEditor
+            template={state.ui.editingTemplate.template}
+            templateKey={state.ui.editingTemplate.key}
+            onSave={handleSaveTemplate}
+            onCancel={handleCancelEdit}
+            availableFields={getAvailableFields()}
+          />
+        )}
         
         {/* Navigation */}
         <div className="flex justify-between">
