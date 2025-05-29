@@ -1,7 +1,11 @@
 'use client';
 
+// == IMPORTS ==
+
 import React, { useState, useEffect, useContext, createContext, useReducer, useMemo } from 'react';
 import { Upload, FileText, Link, Download, CheckCircle, AlertTriangle, X, Settings, Save, FolderOpen, Eye, ArrowRight, Database, Zap, Edit3, Plus, Trash2, Copy } from 'lucide-react';
+
+// == CONSTANTS ==
 
 // Enhanced Configuration Templates with complete mappings
 const CONFIGURATION_TEMPLATES = {
@@ -248,105 +252,6 @@ const CONFIGURATION_TEMPLATES = {
   }
 };
 
-// Template Detection Logic
-const detectBestTemplate = (ordersFile, commissionsFile) => {
-  const allFilenames = [ordersFile.filename, commissionsFile.filename].join(' ').toLowerCase();
-  const allHeaders = [...ordersFile.headers, ...commissionsFile.headers].join(' ').toLowerCase();
-  
-  // Detection rules based on filename patterns and field analysis
-  const detectionRules = [
-    {
-      templateKey: 'appdirect',
-      confidence: 0,
-      checks: [
-        { type: 'filename', pattern: /appdirect/i, weight: 50 },
-        { type: 'header', pattern: /advisor.*id|legacy.*advisor/i, weight: 30 },
-        { type: 'header', pattern: /provider.*customer.*name/i, weight: 20 },
-        { type: 'header', pattern: /comp.*paid/i, weight: 15 }
-      ]
-    },
-    {
-      templateKey: 'intelisys',
-      confidence: 0,
-      checks: [
-        { type: 'filename', pattern: /intelisys/i, weight: 50 },
-        { type: 'header', pattern: /rpm.*order/i, weight: 40 },
-        { type: 'header', pattern: /supplier/i, weight: 20 },
-        { type: 'header', pattern: /location.*number/i, weight: 15 }
-      ]
-    },
-    {
-      templateKey: 'windstream',
-      confidence: 0,
-      checks: [
-        { type: 'filename', pattern: /windstream/i, weight: 50 },
-        { type: 'header', pattern: /accountnbr/i, weight: 30 },
-        { type: 'header', pattern: /custfname|custlname/i, weight: 25 },
-        { type: 'header', pattern: /phonenbr/i, weight: 15 }
-      ]
-    },
-    {
-      templateKey: 'avant',
-      confidence: 0,
-      checks: [
-        { type: 'filename', pattern: /avant/i, weight: 50 },
-        { type: 'header', pattern: /acct.*#/i, weight: 25 },
-        { type: 'header', pattern: /net.*billed/i, weight: 20 },
-        { type: 'header', pattern: /sales.*commission/i, weight: 20 },
-        { type: 'header', pattern: /assignment.*code/i, weight: 15 },
-        { type: 'header', pattern: /run.*month/i, weight: 10 }
-      ]
-    },
-    {
-      templateKey: 'ibs',
-      confidence: 0,
-      checks: [
-        { type: 'filename', pattern: /ibs/i, weight: 50 },
-        { type: 'header', pattern: /rep.*name/i, weight: 25 },
-        { type: 'header', pattern: /customer.*name/i, weight: 20 },
-        { type: 'header', pattern: /service.*provider/i, weight: 20 },
-        { type: 'header', pattern: /products.*sold/i, weight: 15 },
-        { type: 'header', pattern: /bandwidth.*type/i, weight: 10 }
-      ]
-    },
-    {
-      templateKey: 'sandler',
-      confidence: 0,
-      checks: [
-        { type: 'filename', pattern: /sandler/i, weight: 50 },
-        { type: 'header', pattern: /sandler.*order/i, weight: 40 },
-        { type: 'header', pattern: /contract.*mrc/i, weight: 25 },
-        { type: 'header', pattern: /contract.*terms.*months/i, weight: 20 },
-        { type: 'header', pattern: /provider.*account/i, weight: 15 },
-        { type: 'header', pattern: /agent.*comm/i, weight: 15 }
-      ]
-    }
-  ];
-  
-  // Calculate confidence scores
-  detectionRules.forEach(rule => {
-    rule.checks.forEach(check => {
-      const searchText = check.type === 'filename' ? allFilenames : allHeaders;
-      if (check.pattern.test(searchText)) {
-        rule.confidence += check.weight;
-      }
-    });
-  });
-  
-  // Sort by confidence and return best match
-  detectionRules.sort((a, b) => b.confidence - a.confidence);
-  const bestMatch = detectionRules[0];
-  
-  return {
-    templateKey: bestMatch.confidence > 30 ? bestMatch.templateKey : null,
-    confidence: bestMatch.confidence,
-    allScores: detectionRules.map(r => ({ 
-      template: r.templateKey, 
-      confidence: r.confidence 
-    }))
-  };
-};
-
 const FIELD_SYNONYMS = {
   customer: ['Customer', 'Customer Name', 'Provider Customer Name', 'Client', 'Company Name'],
   account: ['Account', 'Account Number', 'Account #', 'Acct #', 'Provider Account #', 'Billing Account Number'],
@@ -379,6 +284,8 @@ const EXPORT_TEMPLATES = {
     'Product Description', 'Circuit ID', 'Bill To'
   ]
 };
+
+// == CONTEXT & REDUCER ==
 
 // App State Context
 const AppStateContext = createContext();
@@ -465,12 +372,65 @@ function appReducer(state, action) {
           }
         }
       };
+    case 'RESOLVE_CONFLICT':
+      const { conflictIndex, action: resolutionAction, matchIndex } = action.payload;
+      const updatedConflicts = [...state.linking.conflicts];
+      const resolvedConflict = updatedConflicts[conflictIndex];
+      
+      if (resolutionAction === 'accept' && matchIndex !== undefined) {
+        // Move the accepted match to the matches array
+        const newMatch = {
+          orderRecord: resolvedConflict.orderRecord,
+          commissionRecord: resolvedConflict.commissionRecords[matchIndex],
+          confidence: resolvedConflict.scores ? resolvedConflict.scores[matchIndex] : 85,
+          method: 'Manual resolution',
+          matchScore: resolvedConflict.scores ? resolvedConflict.scores[matchIndex] : 85,
+          isManuallyResolved: true
+        };
+        
+        const updatedMatches = [...state.linking.matches, newMatch];
+        updatedConflicts.splice(conflictIndex, 1);
+        
+        return {
+          ...state,
+          linking: {
+            ...state.linking,
+            matches: updatedMatches,
+            conflicts: updatedConflicts,
+            statistics: {
+              ...state.linking.statistics,
+              matches: updatedMatches.length,
+              needsReview: updatedConflicts.length,
+              matchRate: Math.round((updatedMatches.length / state.linking.statistics.totalRecords) * 100),
+              reviewRate: Math.round((updatedConflicts.length / state.linking.statistics.totalRecords) * 100)
+            }
+          }
+        };
+      } else if (resolutionAction === 'reject') {
+        // Remove the conflict (mark as manually rejected)
+        updatedConflicts.splice(conflictIndex, 1);
+        
+        return {
+          ...state,
+          linking: {
+            ...state.linking,
+            conflicts: updatedConflicts,
+            statistics: {
+              ...state.linking.statistics,
+              needsReview: updatedConflicts.length,
+              reviewRate: Math.round((updatedConflicts.length / state.linking.statistics.totalRecords) * 100)
+            }
+          }
+        };
+      }
+      return state;
     default:
       return state;
   }
 }
 
-// Utility Functions
+// == UTILS ==
+
 const parseCSV = (csvText) => {
   const lines = csvText.split('\n').filter(line => line.trim());
   if (lines.length === 0) return { headers: [], data: [] };
@@ -754,6 +714,107 @@ const linkRecords = (ordersData, commissionsData, linkingRules) => {
     }
   };
 };
+
+// Template Detection Logic
+const detectBestTemplate = (ordersFile, commissionsFile) => {
+  const allFilenames = [ordersFile.filename, commissionsFile.filename].join(' ').toLowerCase();
+  const allHeaders = [...ordersFile.headers, ...commissionsFile.headers].join(' ').toLowerCase();
+  
+  // Detection rules based on filename patterns and field analysis
+  const detectionRules = [
+    {
+      templateKey: 'appdirect',
+      confidence: 0,
+      checks: [
+        { type: 'filename', pattern: /appdirect/i, weight: 50 },
+        { type: 'header', pattern: /advisor.*id|legacy.*advisor/i, weight: 30 },
+        { type: 'header', pattern: /provider.*customer.*name/i, weight: 20 },
+        { type: 'header', pattern: /comp.*paid/i, weight: 15 }
+      ]
+    },
+    {
+      templateKey: 'intelisys',
+      confidence: 0,
+      checks: [
+        { type: 'filename', pattern: /intelisys/i, weight: 50 },
+        { type: 'header', pattern: /rpm.*order/i, weight: 40 },
+        { type: 'header', pattern: /supplier/i, weight: 20 },
+        { type: 'header', pattern: /location.*number/i, weight: 15 }
+      ]
+    },
+    {
+      templateKey: 'windstream',
+      confidence: 0,
+      checks: [
+        { type: 'filename', pattern: /windstream/i, weight: 50 },
+        { type: 'header', pattern: /accountnbr/i, weight: 30 },
+        { type: 'header', pattern: /custfname|custlname/i, weight: 25 },
+        { type: 'header', pattern: /phonenbr/i, weight: 15 }
+      ]
+    },
+    {
+      templateKey: 'avant',
+      confidence: 0,
+      checks: [
+        { type: 'filename', pattern: /avant/i, weight: 50 },
+        { type: 'header', pattern: /acct.*#/i, weight: 25 },
+        { type: 'header', pattern: /net.*billed/i, weight: 20 },
+        { type: 'header', pattern: /sales.*commission/i, weight: 20 },
+        { type: 'header', pattern: /assignment.*code/i, weight: 15 },
+        { type: 'header', pattern: /run.*month/i, weight: 10 }
+      ]
+    },
+    {
+      templateKey: 'ibs',
+      confidence: 0,
+      checks: [
+        { type: 'filename', pattern: /ibs/i, weight: 50 },
+        { type: 'header', pattern: /rep.*name/i, weight: 25 },
+        { type: 'header', pattern: /customer.*name/i, weight: 20 },
+        { type: 'header', pattern: /service.*provider/i, weight: 20 },
+        { type: 'header', pattern: /products.*sold/i, weight: 15 },
+        { type: 'header', pattern: /bandwidth.*type/i, weight: 10 }
+      ]
+    },
+    {
+      templateKey: 'sandler',
+      confidence: 0,
+      checks: [
+        { type: 'filename', pattern: /sandler/i, weight: 50 },
+        { type: 'header', pattern: /sandler.*order/i, weight: 40 },
+        { type: 'header', pattern: /contract.*mrc/i, weight: 25 },
+        { type: 'header', pattern: /contract.*terms.*months/i, weight: 20 },
+        { type: 'header', pattern: /provider.*account/i, weight: 15 },
+        { type: 'header', pattern: /agent.*comm/i, weight: 15 }
+      ]
+    }
+  ];
+  
+  // Calculate confidence scores
+  detectionRules.forEach(rule => {
+    rule.checks.forEach(check => {
+      const searchText = check.type === 'filename' ? allFilenames : allHeaders;
+      if (check.pattern.test(searchText)) {
+        rule.confidence += check.weight;
+      }
+    });
+  });
+  
+  // Sort by confidence and return best match
+  detectionRules.sort((a, b) => b.confidence - a.confidence);
+  const bestMatch = detectionRules[0];
+  
+  return {
+    templateKey: bestMatch.confidence > 30 ? bestMatch.templateKey : null,
+    confidence: bestMatch.confidence,
+    allScores: detectionRules.map(r => ({ 
+      template: r.templateKey, 
+      confidence: r.confidence 
+    }))
+  };
+};
+
+// == COMPONENTS ==
 
 // Template Editor Component
 const TemplateEditor = ({ template, templateKey, onSave, onCancel, availableFields }) => {
@@ -1293,7 +1354,261 @@ const FileUploadZone = ({ onFileUpload, fileType, currentFile }) => {
   );
 };
 
-const LinkingDashboard = ({ linking, onLink }) => {
+// Conflict Resolution Card Component
+const ConflictResolutionCard = ({ conflict, conflictIndex, onResolve }) => {
+  const [selectedMatch, setSelectedMatch] = useState(null);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [resolving, setResolving] = useState(false);
+
+  const handleAccept = async (matchIndex) => {
+    if (matchIndex === null || matchIndex === undefined) return;
+    
+    setResolving(true);
+    try {
+      await onResolve(conflictIndex, 'accept', matchIndex);
+      setShowConfirmation(false);
+      setSelectedMatch(null);
+    } catch (error) {
+      console.error('Error resolving conflict:', error);
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  const handleReject = async () => {
+    setResolving(true);
+    try {
+      await onResolve(conflictIndex, 'reject');
+      setShowConfirmation(false);
+      setSelectedMatch(null);
+    } catch (error) {
+      console.error('Error rejecting matches:', error);
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  return (
+    <div className="border border-yellow-200 rounded-lg p-4 bg-yellow-50">
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center">
+          <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-medium mr-2">
+            NEEDS REVIEW
+          </span>
+          <span className="text-sm font-medium text-yellow-800">
+            {conflict.commissionRecords?.length || 'Multiple'} potential matches found
+          </span>
+        </div>
+        <span className="text-xs text-yellow-600 capitalize">
+          {conflict.issue?.replace(/_/g, ' ') || 'Multiple matches'}
+        </span>
+      </div>
+      
+      {/* Order Record */}
+      <div className="mb-4 p-3 bg-white rounded border">
+        <p className="text-sm font-medium text-gray-700 mb-2">📋 Order Record to Match:</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+          <div>
+            <span className="font-medium text-gray-600">Customer:</span>
+            <p className="text-gray-900">{conflict.orderRecord.Customer || 'N/A'}</p>
+          </div>
+          <div>
+            <span className="font-medium text-gray-600">Provider:</span>
+            <p className="text-gray-900">{conflict.orderRecord.Provider || 'N/A'}</p>
+          </div>
+          <div>
+            <span className="font-medium text-gray-600">Account:</span>
+            <p className="text-gray-900">
+              {conflict.orderRecord['Billing Account Number'] || 
+               conflict.orderRecord['Provider Account #'] || 
+               conflict.orderRecord.Account || 'N/A'}
+            </p>
+          </div>
+        </div>
+        {conflict.orderRecord['Sales Rep'] && (
+          <div className="mt-2 text-sm">
+            <span className="font-medium text-gray-600">Sales Rep:</span>
+            <span className="ml-1 text-gray-900">{conflict.orderRecord['Sales Rep']}</span>
+          </div>
+        )}
+      </div>
+      
+      {/* Potential Commission Matches */}
+      <div>
+        <p className="text-sm font-medium text-gray-700 mb-3">💰 Potential Commission Matches:</p>
+        <div className="space-y-3">
+          {conflict.commissionRecords?.slice(0, 3).map((commissionRecord, matchIdx) => (
+            <div 
+              key={matchIdx} 
+              className={`p-3 rounded border transition-all ${
+                selectedMatch === matchIdx 
+                  ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-200' 
+                  : 'bg-white border-gray-200 hover:border-blue-200'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center">
+                  <input
+                    type="radio"
+                    id={`match-${conflictIndex}-${matchIdx}`}
+                    name={`conflict-${conflictIndex}`}
+                    checked={selectedMatch === matchIdx}
+                    onChange={() => setSelectedMatch(matchIdx)}
+                    className="mr-2"
+                  />
+                  <label 
+                    htmlFor={`match-${conflictIndex}-${matchIdx}`}
+                    className="text-xs font-medium text-blue-600 cursor-pointer"
+                  >
+                    Match Option #{matchIdx + 1}
+                  </label>
+                </div>
+                {conflict.scores && conflict.scores[matchIdx] && (
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                    Score: {conflict.scores[matchIdx]}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                <div>
+                  <span className="font-medium text-gray-600">Customer:</span>
+                  <p className="text-gray-900">
+                    {commissionRecord.Customer || 
+                     commissionRecord['Provider Customer Name'] || 'N/A'}
+                  </p>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-600">Provider:</span>
+                  <p className="text-gray-900">
+                    {commissionRecord['Provider Name'] || 
+                     commissionRecord.Provider || 'N/A'}
+                  </p>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-600">Account:</span>
+                  <p className="text-gray-900">
+                    {commissionRecord['Account Number'] || 
+                     commissionRecord['Account #'] || 
+                     commissionRecord.Account || 'N/A'}
+                  </p>
+                </div>
+              </div>
+              {(commissionRecord.Rep || commissionRecord['Sales Rep']) && (
+                <div className="mt-2 text-sm">
+                  <span className="font-medium text-gray-600">Rep:</span>
+                  <span className="ml-1 text-gray-900">
+                    {commissionRecord.Rep || commissionRecord['Sales Rep']}
+                  </span>
+                </div>
+              )}
+              {commissionRecord['Comp Paid'] && (
+                <div className="mt-2 text-sm">
+                  <span className="font-medium text-gray-600">Commission:</span>
+                  <span className="ml-1 text-green-600 font-medium">
+                    ${commissionRecord['Comp Paid']}
+                  </span>
+                </div>
+              )}
+            </div>
+          )) || (
+            <div className="p-3 bg-gray-50 rounded text-sm text-gray-600 italic">
+              No detailed match information available
+            </div>
+          )}
+        </div>
+      </div>
+      
+      {/* Action Buttons */}
+      <div className="mt-4 flex items-center justify-between p-3 bg-white border border-gray-200 rounded">
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => setShowConfirmation(true)}
+            disabled={selectedMatch === null || resolving}
+            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+              selectedMatch !== null && !resolving
+                ? 'bg-green-500 text-white hover:bg-green-600'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            {resolving ? (
+              <div className="flex items-center">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                Processing...
+              </div>
+            ) : (
+              <>
+                <CheckCircle className="h-4 w-4 inline mr-1" />
+                Accept Selected Match
+              </>
+            )}
+          </button>
+          
+          <button
+            onClick={() => handleReject()}
+            disabled={resolving}
+            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+              !resolving
+                ? 'bg-red-500 text-white hover:bg-red-600'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            {resolving ? (
+              <div className="flex items-center">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                Processing...
+              </div>
+            ) : (
+              <>
+                <X className="h-4 w-4 inline mr-1" />
+                Reject All Matches
+              </>
+            )}
+          </button>
+        </div>
+        
+        {selectedMatch !== null && (
+          <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+            Selected: Match Option #{selectedMatch + 1}
+          </div>
+        )}
+      </div>
+
+      {/* Confirmation Modal */}
+      {showConfirmation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div className="p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Confirm Match Resolution
+              </h3>
+              <p className="text-gray-600 mb-6">
+                Are you sure you want to accept Match Option #{selectedMatch + 1} for this order record? 
+                This will create a confirmed link between the order and commission records.
+              </p>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowConfirmation(false)}
+                  className="px-4 py-2 text-gray-700 bg-gray-200 rounded hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleAccept(selectedMatch)}
+                  className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+                >
+                  <CheckCircle className="h-4 w-4 inline mr-1" />
+                  Confirm Match
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const LinkingDashboard = ({ linking, onLink, onResolveConflict }) => {
   // Calculate additional statistics
   const totalCommissionRecords = linking.statistics.totalCommissionRecords || 0;
   const totalOrderRecords = linking.statistics.totalRecords || 0;
@@ -1459,6 +1774,16 @@ const LinkingDashboard = ({ linking, onLink }) => {
             
             return (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="text-center p-3 bg-green-50 rounded-lg">
+                  <div className="text-2xl font-bold text-green-600">{highConfidence}</div>
+                  <div className="text-sm text-green-700">High Confidence</div>
+                  <div className="text-xs text-green-500">90%+ match score</div>
+                </div>
+                <div className="text-center p-3 bg-yellow-50 rounded-lg">
+                  <div className="text-2xl font-bold text-yellow-600">{mediumConfidence}</div>
+                  <div className="text-sm text-yellow-700">Medium Confidence</div>
+                  <div className="text-xs text-yellow-500">70-89% match score</div>
+                </div>
                 <div className="text-center p-3 bg-orange-50 rounded-lg">
                   <div className="text-2xl font-bold text-orange-600">{lowConfidence}</div>
                   <div className="text-sm text-orange-700">Low Confidence</div>
@@ -1484,7 +1809,14 @@ const LinkingDashboard = ({ linking, onLink }) => {
                   }`}>
                     {Math.round(match.confidence)}% confidence
                   </span>
-                  <span className="text-xs text-gray-500">Score: {match.matchScore}</span>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs text-gray-500">Score: {match.matchScore}</span>
+                    {match.isManuallyResolved && (
+                      <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                        Manually Resolved
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
                   <div>
@@ -1521,123 +1853,12 @@ const LinkingDashboard = ({ linking, onLink }) => {
           </h4>
           <div className="space-y-4">
             {linking.conflicts.map((conflict, idx) => (
-              <div key={idx} className="border border-yellow-200 rounded-lg p-4 bg-yellow-50">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center">
-                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-medium mr-2">
-                      NEEDS REVIEW
-                    </span>
-                    <span className="text-sm font-medium text-yellow-800">
-                      {conflict.commissionRecords?.length || 'Multiple'} potential matches found
-                    </span>
-                  </div>
-                  <span className="text-xs text-yellow-600 capitalize">
-                    {conflict.issue?.replace(/_/g, ' ') || 'Multiple matches'}
-                  </span>
-                </div>
-                
-                {/* Order Record */}
-                <div className="mb-4 p-3 bg-white rounded border">
-                  <p className="text-sm font-medium text-gray-700 mb-2">📋 Order Record to Match:</p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                    <div>
-                      <span className="font-medium text-gray-600">Customer:</span>
-                      <p className="text-gray-900">{conflict.orderRecord.Customer || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <span className="font-medium text-gray-600">Provider:</span>
-                      <p className="text-gray-900">{conflict.orderRecord.Provider || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <span className="font-medium text-gray-600">Account:</span>
-                      <p className="text-gray-900">
-                        {conflict.orderRecord['Billing Account Number'] || 
-                         conflict.orderRecord['Provider Account #'] || 
-                         conflict.orderRecord.Account || 'N/A'}
-                      </p>
-                    </div>
-                  </div>
-                  {conflict.orderRecord['Sales Rep'] && (
-                    <div className="mt-2 text-sm">
-                      <span className="font-medium text-gray-600">Sales Rep:</span>
-                      <span className="ml-1 text-gray-900">{conflict.orderRecord['Sales Rep']}</span>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Potential Commission Matches */}
-                <div>
-                  <p className="text-sm font-medium text-gray-700 mb-3">💰 Potential Commission Matches:</p>
-                  <div className="space-y-3">
-                    {conflict.commissionRecords?.slice(0, 3).map((commissionRecord, matchIdx) => (
-                      <div key={matchIdx} className="p-3 bg-white rounded border border-gray-200">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-medium text-blue-600">
-                            Match Option #{matchIdx + 1}
-                          </span>
-                          {conflict.scores && conflict.scores[matchIdx] && (
-                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                              Score: {conflict.scores[matchIdx]}
-                            </span>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                          <div>
-                            <span className="font-medium text-gray-600">Customer:</span>
-                            <p className="text-gray-900">
-                              {commissionRecord.Customer || 
-                               commissionRecord['Provider Customer Name'] || 'N/A'}
-                            </p>
-                          </div>
-                          <div>
-                            <span className="font-medium text-gray-600">Provider:</span>
-                            <p className="text-gray-900">
-                              {commissionRecord['Provider Name'] || 
-                               commissionRecord.Provider || 'N/A'}
-                            </p>
-                          </div>
-                          <div>
-                            <span className="font-medium text-gray-600">Account:</span>
-                            <p className="text-gray-900">
-                              {commissionRecord['Account Number'] || 
-                               commissionRecord['Account #'] || 
-                               commissionRecord.Account || 'N/A'}
-                            </p>
-                          </div>
-                        </div>
-                        {(commissionRecord.Rep || commissionRecord['Sales Rep']) && (
-                          <div className="mt-2 text-sm">
-                            <span className="font-medium text-gray-600">Rep:</span>
-                            <span className="ml-1 text-gray-900">
-                              {commissionRecord.Rep || commissionRecord['Sales Rep']}
-                            </span>
-                          </div>
-                        )}
-                        {commissionRecord['Comp Paid'] && (
-                          <div className="mt-2 text-sm">
-                            <span className="font-medium text-gray-600">Commission:</span>
-                            <span className="ml-1 text-green-600 font-medium">
-                              ${commissionRecord['Comp Paid']}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )) || (
-                      <div className="p-3 bg-gray-50 rounded text-sm text-gray-600 italic">
-                        No detailed match information available
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Action needed */}
-                <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded">
-                  <p className="text-sm text-amber-800">
-                    <strong>Action Required:</strong> Manual review needed to determine the correct match. 
-                    Consider updating linking rules or manually matching these records.
-                  </p>
-                </div>
-              </div>
+              <ConflictResolutionCard 
+                key={idx}
+                conflict={conflict}
+                conflictIndex={idx}
+                onResolve={onResolveConflict}
+              />
             ))}
           </div>
         </div>
@@ -2088,6 +2309,19 @@ export default function TelecomDataProcessor() {
       commissions: state.files.commissions.headers || []
     };
   };
+
+  const handleResolveConflict = async (conflictIndex, action, matchIndex = null) => {
+    return new Promise((resolve) => {
+      // Add a small delay to simulate processing
+      setTimeout(() => {
+        dispatch({
+          type: 'RESOLVE_CONFLICT',
+          payload: { conflictIndex, action, matchIndex }
+        });
+        resolve();
+      }, 1000);
+    });
+  };
   
   const handleLinkData = () => {
     if (!state.files.orders.data || !state.files.commissions.data) return;
@@ -2378,7 +2612,7 @@ export default function TelecomDataProcessor() {
                   <p className="text-lg">Analyzing and linking records...</p>
                 </div>
               ) : (
-                <LinkingDashboard linking={state.linking} onLink={handleLinkData} />
+                <LinkingDashboard linking={state.linking} onLink={handleLinkData} onResolveConflict={handleResolveConflict} />
               )}
             </div>
           )}
