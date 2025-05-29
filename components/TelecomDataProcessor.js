@@ -14,10 +14,10 @@ const CONFIGURATION_TEMPLATES = {
     description: "Standard configuration for AppDirect orders and commissions",
     linkingRules: {
       strategy: "multi_criteria",
-      primaryKey: "Order ID",
-      fallbackKeys: [
-        { fields: ["Customer", "Provider"], fuzzyThreshold: 0.85 },
-        { fields: ["Customer", "Sales Rep"], fuzzyThreshold: 0.9 }
+      matchingRules: [
+        { ordersField: "Order ID", commissionsField: "Order ID", matchType: "exact", fuzzyThreshold: 0.85 },
+        { ordersField: "Customer", commissionsField: "Customer", matchType: "fuzzy", fuzzyThreshold: 0.85 },
+        { ordersField: "Provider", commissionsField: "Provider Name", matchType: "fuzzy", fuzzyThreshold: 0.8 }
       ]
     },
     fieldMappings: {
@@ -58,9 +58,9 @@ const CONFIGURATION_TEMPLATES = {
     description: "Configuration for Intelisys RPM orders and commissions",
     linkingRules: {
       strategy: "exact",
-      primaryKey: "RPM Order",
-      fallbackKeys: [
-        { fields: ["Customer", "Rep"], fuzzyThreshold: 0.85 }
+      matchingRules: [
+        { ordersField: "RPM Order", commissionsField: "RPM Order", matchType: "exact", fuzzyThreshold: 0.85 },
+        { ordersField: "Customer", commissionsField: "Customer", matchType: "fuzzy", fuzzyThreshold: 0.85 }
       ]
     },
     fieldMappings: {
@@ -86,9 +86,9 @@ const CONFIGURATION_TEMPLATES = {
     description: "Configuration for Windstream orders and commissions",
     linkingRules: {
       strategy: "tiered",
-      primaryKey: "Account Number",
-      fallbackKeys: [
-        { fields: ["Customer Name", "Account Number"], fuzzyThreshold: 0.9 }
+      matchingRules: [
+        { ordersField: "Account Number", commissionsField: "Account Number", matchType: "exact", fuzzyThreshold: 0.85 },
+        { ordersField: "Customer Name", commissionsField: "Customer Name", matchType: "fuzzy", fuzzyThreshold: 0.9 }
       ]
     },
     fieldMappings: {
@@ -110,10 +110,10 @@ const CONFIGURATION_TEMPLATES = {
     description: "Configuration for Avant RPM orders and commissions",
     linkingRules: {
       strategy: "multi_criteria",
-      primaryKey: "Account",
-      fallbackKeys: [
-        { fields: ["Customer", "Rep"], fuzzyThreshold: 0.85 },
-        { fields: ["Customer", "Supplier"], fuzzyThreshold: 0.8 }
+      matchingRules: [
+        { ordersField: "Account", commissionsField: "Acct #", matchType: "exact", fuzzyThreshold: 0.85 },
+        { ordersField: "Customer", commissionsField: "Customer", matchType: "fuzzy", fuzzyThreshold: 0.85 },
+        { ordersField: "Provider", commissionsField: "Provider", matchType: "fuzzy", fuzzyThreshold: 0.8 }
       ]
     },
     fieldMappings: {
@@ -158,10 +158,10 @@ const CONFIGURATION_TEMPLATES = {
     description: "Configuration for IBS orders and commissions",
     linkingRules: {
       strategy: "multi_criteria",
-      primaryKey: "Account",
-      fallbackKeys: [
-        { fields: ["Customer", "Rep"], fuzzyThreshold: 0.85 },
-        { fields: ["Customer", "Supplier"], fuzzyThreshold: 0.8 }
+      matchingRules: [
+        { ordersField: "Account", commissionsField: "Account", matchType: "exact", fuzzyThreshold: 0.85 },
+        { ordersField: "Customer Name", commissionsField: "Customer", matchType: "fuzzy", fuzzyThreshold: 0.85 },
+        { ordersField: "Service Provider", commissionsField: "Supplier", matchType: "fuzzy", fuzzyThreshold: 0.8 }
       ]
     },
     fieldMappings: {
@@ -208,11 +208,10 @@ const CONFIGURATION_TEMPLATES = {
     description: "Configuration for Sandler orders and commissions",
     linkingRules: {
       strategy: "cross_file",
-      primaryKey: "Sandler Order #",
-      secondaryKey: "Account #",
-      fallbackKeys: [
-        { fields: ["Customer", "Provider"], fuzzyThreshold: 0.85 },
-        { fields: ["Customer", "Rep"], fuzzyThreshold: 0.9 }
+      matchingRules: [
+        { ordersField: "Sandler Order #", commissionsField: "Account #", matchType: "exact", fuzzyThreshold: 0.85 },
+        { ordersField: "Customer", commissionsField: "Customer", matchType: "fuzzy", fuzzyThreshold: 0.85 },
+        { ordersField: "Provider", commissionsField: "Rep", matchType: "fuzzy", fuzzyThreshold: 0.9 }
       ]
     },
     fieldMappings: {
@@ -540,124 +539,89 @@ const linkRecords = (ordersData, commissionsData, linkingRules) => {
     return (1 - editDistance / longer.length) >= threshold;
   };
 
-  // Enhanced linking logic that supports cross-file matching
-  const tryDirectMatch = (order, commission, primaryKey, secondaryKey) => {
-    // Handle cross-file linking (e.g., Sandler Order # to Account #)
-    if (linkingRules.strategy === 'cross_file' && primaryKey && secondaryKey) {
-      const primaryValue = order[primaryKey] || commission[primaryKey];
-      const secondaryValue = order[secondaryKey] || commission[secondaryKey];
+  // Enhanced linking logic using matching rules
+  const tryMatchingRules = (order, commission, matchingRules) => {
+    let totalScore = 0;
+    const reasons = [];
+    
+    if (!matchingRules || matchingRules.length === 0) {
+      // Fallback to legacy matching for backwards compatibility
+      return tryLegacyMatching(order, commission);
+    }
+    
+    for (const rule of matchingRules) {
+      const orderValue = order[rule.ordersField];
+      const commissionValue = commission[rule.commissionsField];
       
-      if (primaryValue && secondaryValue && String(primaryValue) === String(secondaryValue)) {
-        return { score: 100, reason: `Cross-file match: ${primaryKey} = ${secondaryKey}` };
+      if (!orderValue || !commissionValue) continue;
+      
+      let matches = false;
+      let score = 0;
+      
+      if (rule.matchType === 'exact') {
+        if (String(orderValue).trim() === String(commissionValue).trim()) {
+          matches = true;
+          score = 100;
+        }
+      } else if (rule.matchType === 'fuzzy') {
+        if (fuzzyMatch(orderValue, commissionValue, rule.fuzzyThreshold)) {
+          matches = true;
+          score = Math.round(rule.fuzzyThreshold * 100);
+        }
+      }
+      
+      if (matches) {
+        totalScore += score;
+        reasons.push(`${rule.ordersField}↔${rule.commissionsField} (${rule.matchType})`);
       }
     }
     
-    // Standard direct matches
-    if (order[primaryKey] && commission[primaryKey] && 
-        String(order[primaryKey]) === String(commission[primaryKey])) {
-      return { score: 100, reason: `${primaryKey} exact match` };
-    }
-    
-    return null;
+    return totalScore > 0 ? { score: Math.min(totalScore, 100), reasons: reasons.join(', ') } : null;
   };
   
-  // Try multiple linking strategies
+  // Legacy matching function for backwards compatibility
+  const tryLegacyMatching = (order, commission) => {
+    let score = 0;
+    const reasons = [];
+    
+    // Try Order ID exact match
+    if (order['Order ID'] && commission['Order ID'] && 
+        String(order['Order ID']) === String(commission['Order ID'])) {
+      score += 100;
+      reasons.push('Order ID exact match');
+    }
+    
+    // Try customer name matching
+    if (order.Customer && commission.Customer) {
+      if (fuzzyMatch(order.Customer, commission.Customer, 0.9)) {
+        score += 50;
+        reasons.push('Customer name match');
+      }
+    }
+    
+    // Try provider matching
+    if (order.Provider && commission['Provider Name']) {
+      if (fuzzyMatch(order.Provider, commission['Provider Name'], 0.8)) {
+        score += 30;
+        reasons.push('Provider match');
+      }
+    }
+    
+    return score > 0 ? { score: Math.min(score, 100), reasons: reasons.join(', ') } : null;
+  };
+  
+  // Try matching each order record
   ordersData.forEach(order => {
     const potentialMatches = [];
     
     commissionsData.forEach(commission => {
-      let score = 0;
-      const reasons = [];
+      const matchResult = tryMatchingRules(order, commission, linkingRules.matchingRules);
       
-      // 1. Try primary key matching (including cross-file)
-      const directMatch = tryDirectMatch(
-        order, 
-        commission, 
-        linkingRules.primaryKey, 
-        linkingRules.secondaryKey
-      );
-      
-      if (directMatch) {
-        score += directMatch.score;
-        reasons.push(directMatch.reason);
-      }
-      
-      // 2. Try Order ID exact match (fallback for compatibility)
-      if (!directMatch && order['Order ID'] && commission['Order ID'] && 
-          String(order['Order ID']) === String(commission['Order ID'])) {
-        score += 100;
-        reasons.push('Order ID exact match');
-      }
-      
-      // 3. Try customer name matching
-      if (order.Customer && commission.Customer) {
-        if (fuzzyMatch(order.Customer, commission.Customer, 0.9)) {
-          score += 50;
-          reasons.push('Customer name match');
-        } else if (fuzzyMatch(order.Customer, commission['Provider Customer Name'], 0.9)) {
-          score += 45;
-          reasons.push('Customer-Provider Customer match');
-        }
-      }
-      
-      // 4. Try provider matching
-      if (order.Provider && commission['Provider Name']) {
-        if (fuzzyMatch(order.Provider, commission['Provider Name'], 0.8)) {
-          score += 30;
-          reasons.push('Provider match');
-        }
-      } else if (order.Provider && commission.Provider) {
-        if (fuzzyMatch(order.Provider, commission.Provider, 0.8)) {
-          score += 30;
-          reasons.push('Provider match');
-        }
-      }
-      
-      // 5. Try account number matching
-      if (order['Billing Account Number'] && commission['Account Number']) {
-        if (String(order['Billing Account Number']) === String(commission['Account Number'])) {
-          score += 40;
-          reasons.push('Account number match');
-        }
-      } else if (order['Provider Account #'] && commission['Account #']) {
-        if (String(order['Provider Account #']) === String(commission['Account #'])) {
-          score += 40;
-          reasons.push('Provider account match');
-        }
-      }
-      
-      // 6. Try sales rep matching
-      if (order['Sales Rep'] && commission['Sales Rep']) {
-        if (fuzzyMatch(order['Sales Rep'], commission['Sales Rep'], 0.9)) {
-          score += 20;
-          reasons.push('Sales rep match');
-        }
-      } else if (order['Sales Rep'] && commission.Rep) {
-        if (fuzzyMatch(order['Sales Rep'], commission.Rep, 0.9)) {
-          score += 20;
-          reasons.push('Rep match');
-        }
-      }
-      
-      // 7. Location/Address matching
-      if (order.Location && commission['Site Address']) {
-        if (fuzzyMatch(order.Location, commission['Site Address'], 0.7)) {
-          score += 25;
-          reasons.push('Location match');
-        }
-      } else if (order.Address && commission.Address) {
-        if (fuzzyMatch(order.Address, commission.Address, 0.7)) {
-          score += 25;
-          reasons.push('Address match');
-        }
-      }
-      
-      // If we have a meaningful score, consider it a potential match
-      if (score >= 30) { // Minimum threshold for consideration
+      if (matchResult && matchResult.score >= 30) { // Minimum threshold for consideration
         potentialMatches.push({
           commission,
-          score,
-          reasons: reasons.join(', ')
+          score: matchResult.score,
+          reasons: matchResult.reasons
         });
       }
     });
@@ -683,7 +647,7 @@ const linkRecords = (ordersData, commissionsData, linkingRules) => {
       matches.push({
         orderRecord: order,
         commissionRecord: bestMatch.commission,
-        confidence: Math.min(bestMatch.score * 0.8, 100), // Reduce confidence slightly
+        confidence: Math.min(bestMatch.score * 0.8, 100),
         method: bestMatch.reasons + ' (best of multiple)',
         matchScore: bestMatch.score
       });
@@ -829,8 +793,16 @@ const TemplateEditor = ({ template, templateKey, onSave, onCancel, availableFiel
       newErrors.name = 'Template name is required';
     }
     
-    if (!editedTemplate.linkingRules.primaryKey.trim()) {
-      newErrors.primaryKey = 'Primary key is required';
+    // Check that at least one matching rule is configured
+    const matchingRules = editedTemplate.linkingRules.matchingRules || [];
+    if (matchingRules.length === 0) {
+      newErrors.matchingRules = 'At least one matching rule is required';
+    } else {
+      // Check that each matching rule has both fields selected
+      const incompleteRules = matchingRules.some(rule => !rule.ordersField || !rule.commissionsField);
+      if (incompleteRules) {
+        newErrors.matchingRules = 'All matching rules must have both Orders and Commissions fields selected';
+      }
     }
     
     setErrors(newErrors);
@@ -921,6 +893,46 @@ const TemplateEditor = ({ template, templateKey, onSave, onCancel, availableFiel
     }));
   };
 
+  const addMatchingRule = () => {
+    setEditedTemplate(prev => ({
+      ...prev,
+      linkingRules: {
+        ...prev.linkingRules,
+        matchingRules: [
+          ...(prev.linkingRules.matchingRules || []),
+          { ordersField: '', commissionsField: '', matchType: 'exact', fuzzyThreshold: 0.85 }
+        ]
+      }
+    }));
+  };
+
+  const updateMatchingRule = (index, field, value) => {
+    setEditedTemplate(prev => {
+      const newMatchingRules = [...(prev.linkingRules.matchingRules || [])];
+      newMatchingRules[index] = {
+        ...newMatchingRules[index],
+        [field]: value
+      };
+      return {
+        ...prev,
+        linkingRules: {
+          ...prev.linkingRules,
+          matchingRules: newMatchingRules
+        }
+      };
+    });
+  };
+
+  const removeMatchingRule = (index) => {
+    setEditedTemplate(prev => ({
+      ...prev,
+      linkingRules: {
+        ...prev.linkingRules,
+        matchingRules: (prev.linkingRules.matchingRules || []).filter((_, i) => i !== index)
+      }
+    }));
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
@@ -994,136 +1006,116 @@ const TemplateEditor = ({ template, templateKey, onSave, onCancel, availableFiel
           {/* Linking Tab */}
           {activeTab === 'linking' && (
             <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Primary Key Field
-                  </label>
-                  <div className="space-y-2">
-                    <select
-                      value={editedTemplate.linkingRules.primaryKey}
-                      onChange={(e) => updateLinkingRule('primaryKey', e.target.value)}
-                      className={`w-full p-3 border rounded-lg ${errors.primaryKey ? 'border-red-300' : 'border-gray-300'}`}
-                    >
-                      <option value="">Select primary key...</option>
-                      <optgroup label="Orders File Fields">
-                        {availableFields.orders.map(field => (
-                          <option key={field} value={field}>{field}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Commissions File Fields">
-                        {availableFields.commissions.map(field => (
-                          <option key={field} value={field}>{field}</option>
-                        ))}
-                      </optgroup>
-                    </select>
-                    <p className="text-xs text-gray-500">
-                      Choose the field that will be used as the primary identifier for linking records
-                    </p>
-                  </div>
-                  {errors.primaryKey && <p className="text-red-500 text-sm mt-1">{errors.primaryKey}</p>}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Secondary Key Field (Optional)
-                  </label>
-                  <div className="space-y-2">
-                    <select
-                      value={editedTemplate.linkingRules.secondaryKey || ''}
-                      onChange={(e) => updateLinkingRule('secondaryKey', e.target.value)}
-                      className="w-full p-3 border border-gray-300 rounded-lg"
-                    >
-                      <option value="">Select secondary key...</option>
-                      <optgroup label="Orders File Fields">
-                        {availableFields.orders.map(field => (
-                          <option key={field} value={field}>{field}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Commissions File Fields">
-                        {availableFields.commissions.map(field => (
-                          <option key={field} value={field}>{field}</option>
-                        ))}
-                      </optgroup>
-                    </select>
-                    <p className="text-xs text-gray-500">
-                      Optional: Field from the other file that should match the primary key
-                    </p>
-                  </div>
-                </div>
-              </div>
-
+              {/* Matching Rules */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Linking Strategy
-                </label>
-                <select
-                  value={editedTemplate.linkingRules.strategy}
-                  onChange={(e) => updateLinkingRule('strategy', e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-lg"
-                >
-                  <option value="exact">Exact Match</option>
-                  <option value="multi_criteria">Multi-Criteria</option>
-                  <option value="tiered">Tiered Matching</option>
-                  <option value="cross_file">Cross-File Linking</option>
-                </select>
-              </div>
-
-              {/* Fallback Keys */}
-              <div>
-                <div className="flex justify-between items-center mb-3">
+                <div className="flex justify-between items-center mb-4">
                   <label className="block text-sm font-medium text-gray-700">
-                    Fallback Matching Rules
+                    Matching Rules
                   </label>
                   <button
-                    onClick={addFallbackKey}
-                    className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600"
+                    onClick={addMatchingRule}
+                    className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 flex items-center"
                   >
-                    <Plus className="h-4 w-4 inline mr-1" />
-                    Add Rule
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add match
                   </button>
                 </div>
+
+                {/* Header Row */}
+                <div className="grid grid-cols-12 gap-3 mb-3 text-sm font-medium text-gray-700 pb-2 border-b">
+                  <div className="col-span-3">Orders Field</div>
+                  <div className="col-span-2">match</div>
+                  <div className="col-span-2">fuzzy threshold</div>
+                  <div className="col-span-3">Commissions Field</div>
+                  <div className="col-span-2"></div>
+                </div>
+
+                {/* Matching Rules */}
                 <div className="space-y-3">
-                  {(editedTemplate.linkingRules.fallbackKeys || []).map((rule, index) => (
-                    <div key={index} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-                      <select
-                        value={rule.fields[0] || ''}
-                        onChange={(e) => updateFallbackKey(index, 'fields', e.target.value)}
-                        className="flex-1 p-2 border border-gray-300 rounded"
-                      >
-                        <option value="">Select field...</option>
-                        <optgroup label="Orders File Fields">
+                  {((editedTemplate.linkingRules.matchingRules) || [{ ordersField: '', commissionsField: '', matchType: 'exact', fuzzyThreshold: 0.85 }]).map((rule, index) => (
+                    <div key={index} className="grid grid-cols-12 gap-3 items-center">
+                      {/* Orders Field */}
+                      <div className="col-span-3">
+                        <select
+                          value={rule.ordersField || ''}
+                          onChange={(e) => updateMatchingRule(index, 'ordersField', e.target.value)}
+                          className="w-full p-2 border border-gray-300 rounded text-sm"
+                        >
+                          <option value="">Select field...</option>
                           {availableFields.orders.map(field => (
                             <option key={field} value={field}>{field}</option>
                           ))}
-                        </optgroup>
-                        <optgroup label="Commissions File Fields">
-                          {availableFields.commissions.map(field => (
-                            <option key={field} value={field}>{field}</option>
-                          ))}
-                        </optgroup>
-                      </select>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-sm text-gray-600">Threshold:</span>
+                        </select>
+                      </div>
+
+                      {/* Match Type */}
+                      <div className="col-span-2">
+                        <select
+                          value={rule.matchType || 'exact'}
+                          onChange={(e) => updateMatchingRule(index, 'matchType', e.target.value)}
+                          className="w-full p-2 border border-gray-300 rounded text-sm"
+                        >
+                          <option value="exact">exact</option>
+                          <option value="fuzzy">fuzzy</option>
+                        </select>
+                      </div>
+
+                      {/* Fuzzy Threshold */}
+                      <div className="col-span-2">
                         <input
                           type="number"
                           min="0"
                           max="1"
                           step="0.05"
-                          value={rule.fuzzyThreshold}
-                          onChange={(e) => updateFallbackKey(index, 'fuzzyThreshold', parseFloat(e.target.value))}
-                          className="w-20 p-2 border border-gray-300 rounded"
+                          value={rule.fuzzyThreshold || 0.85}
+                          onChange={(e) => updateMatchingRule(index, 'fuzzyThreshold', parseFloat(e.target.value))}
+                          className="w-full p-2 border border-gray-300 rounded text-sm"
+                          disabled={rule.matchType === 'exact'}
                         />
                       </div>
-                      <button
-                        onClick={() => removeFallbackKey(index)}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+
+                      {/* Commissions Field */}
+                      <div className="col-span-3">
+                        <select
+                          value={rule.commissionsField || ''}
+                          onChange={(e) => updateMatchingRule(index, 'commissionsField', e.target.value)}
+                          className="w-full p-2 border border-gray-300 rounded text-sm"
+                        >
+                          <option value="">Select field...</option>
+                          {availableFields.commissions.map(field => (
+                            <option key={field} value={field}>{field}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="col-span-2 flex justify-end">
+                        <button
+                          onClick={() => removeMatchingRule(index)}
+                          className="text-red-500 hover:text-red-700 p-1"
+                          title="Delete match rule"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
+
+                {/* Add helpful text */}
+                <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-blue-700">
+                    <strong>Tip:</strong> Add multiple matching rules to handle cases where a single field match isn't unique. 
+                    The system will use exact matches first, then fall back to fuzzy matching with your specified thresholds.
+                  </p>
+                </div>
+
+                {/* Error display */}
+                {errors.matchingRules && (
+                  <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm text-red-700">{errors.matchingRules}</p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2329,14 +2321,13 @@ export default function TelecomDataProcessor() {
     dispatch({ type: 'SET_UI_STATE', payload: { loading: true } });
     
     setTimeout(() => {
-      // Use template configuration if available
+      // Use template configuration if available, otherwise use default
       const linkingConfig = state.ui.templateConfig?.linkingRules || { 
-        primaryKey: 'Order ID',
         strategy: 'multi_criteria',
-        thresholds: {
-          highConfidence: 70,
-          minimumScore: 30
-        }
+        matchingRules: [
+          { ordersField: 'Order ID', commissionsField: 'Order ID', matchType: 'exact', fuzzyThreshold: 0.85 },
+          { ordersField: 'Customer', commissionsField: 'Customer', matchType: 'fuzzy', fuzzyThreshold: 0.85 }
+        ]
       };
       
       const linkingResults = linkRecords(
@@ -2527,9 +2518,9 @@ export default function TelecomDataProcessor() {
                             <p className="text-sm text-gray-600 mt-1">{displayTemplate.description}</p>
                             <div className="mt-3 space-y-1">
                               <div className="flex items-center text-xs">
-                                <span className="text-gray-500">Primary Key:</span>
+                                <span className="text-gray-500">Matching Rules:</span>
                                 <span className="ml-2 bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
-                                  {displayTemplate.linkingRules.primaryKey}
+                                  {displayTemplate.linkingRules.matchingRules?.length || 0} rules
                                 </span>
                               </div>
                               <div className="text-xs text-gray-500">
