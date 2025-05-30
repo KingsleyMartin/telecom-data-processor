@@ -1,9 +1,9 @@
-import TelecomDataProcessor from '@/components/TelecomDataProcessor';
+import DataMigrationApp from '@/components/DataMigration';
 
 export default function Home() {
   return (
     <main>
-      <TelecomDataProcessor />
+      <DataMigrationApp />
     </main>
   );
 }
