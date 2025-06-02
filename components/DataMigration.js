@@ -1,15 +1,16 @@
 "use client";
 
 import React, { useState, useCallback } from 'react';
-import { Upload, Download, FileText, Users, MapPin, AlertCircle, CheckCircle, X, Search, Globe, MapPinIcon } from 'lucide-react';
+import { Upload, Download, FileText, Users, MapPin, AlertCircle, CheckCircle, X } from 'lucide-react';
 
 const DataMigrationApp = () => {
   const [orderFile, setOrderFile] = useState(null);
   const [processing, setProcessing] = useState(false);
-  const [verifying, setVerifying] = useState(false);
-  const [results, setResults] = useState(null);
+  const [results, setResults] = useState({
+    customers: [],
+    locations: []
+  });
   const [error, setError] = useState('');
-  const [verificationProgress, setVerificationProgress] = useState({ current: 0, total: 0 });
 
   // Helper function to clean and normalize text
   const cleanText = (text) => {
@@ -139,102 +140,6 @@ const DataMigrationApp = () => {
     };
   };
 
-  // Verify address and get company URL
-  const verifyAddressAndURL = async (customer) => {
-    try {
-      // Search for company information
-      const searchQuery = `"${customer.Customer}" address "${customer['Address 1']}" ${customer.City} ${customer.State}`;
-      
-      // Simulate API call - in real implementation, this would call a geocoding/business lookup service
-      // For demo purposes, we'll use mock data
-      const mockVerification = {
-        verified: Math.random() > 0.3, // 70% success rate for demo
-        correctedAddress: customer['Address 1'],
-        correctedCity: customer.City,
-        correctedState: customer.State,
-        url: Math.random() > 0.5 ? `https://www.${customer.Customer.toLowerCase().replace(/[^a-z0-9]/g, '')}.com` : '',
-        confidence: Math.random() * 100
-      };
-      
-      return mockVerification;
-    } catch (error) {
-      return {
-        verified: false,
-        correctedAddress: customer['Address 1'],
-        correctedCity: customer.City,
-        correctedState: customer.State,
-        url: '',
-        confidence: 0
-      };
-    }
-  };
-
-  // Verify all addresses and get URLs
-  const verifyData = async () => {
-    if (!results) return;
-    
-    setVerifying(true);
-    setVerificationProgress({ current: 0, total: results.customers.length });
-    
-    try {
-      const verifiedCustomers = [];
-      const verifiedLocations = [];
-      
-      for (let i = 0; i < results.customers.length; i++) {
-        const customer = results.customers[i];
-        setVerificationProgress({ current: i + 1, total: results.customers.length });
-        
-        const verification = await verifyAddressAndURL(customer);
-        
-        // Update customer with verified data
-        const verifiedCustomer = {
-          ...customer,
-          'Address 1': verification.correctedAddress,
-          City: verification.correctedCity,
-          State: verification.correctedState,
-          'URL (Google)': verification.url,
-          'Verified': verification.verified ? 'Yes' : 'No',
-          'Confidence': Math.round(verification.confidence)
-        };
-        
-        verifiedCustomers.push(verifiedCustomer);
-        
-        // Update corresponding locations
-        const customerLocations = results.locations.filter(loc => 
-          loc.Customer.toUpperCase() === customer.Customer.toUpperCase()
-        );
-        
-        customerLocations.forEach(location => {
-          const verifiedLocation = {
-            ...location,
-            'Address 1': verification.verified ? verification.correctedAddress : location['Address 1'],
-            City: verification.verified ? verification.correctedCity : location.City,
-            State: verification.verified ? verification.correctedState : location.State,
-            'Country (Google)': 'United States', // Default for US addresses
-            'Verified': verification.verified ? 'Yes' : 'No'
-          };
-          verifiedLocations.push(verifiedLocation);
-        });
-        
-        // Add small delay to simulate real API calls
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      
-      // Update results with verified data
-      setResults(prev => ({
-        ...prev,
-        customers: verifiedCustomers,
-        locations: verifiedLocations,
-        verified: true
-      }));
-      
-    } catch (err) {
-      setError(`Error during verification: ${err.message}`);
-    } finally {
-      setVerifying(false);
-      setVerificationProgress({ current: 0, total: 0 });
-    }
-  };
   const arrayToCSV = (data) => {
     if (!data || data.length === 0) return '';
     
@@ -312,8 +217,7 @@ const DataMigrationApp = () => {
       
       setResults({
         customers,
-        locations,
-        verified: false
+        locations
       });
       
     } catch (err) {
@@ -353,7 +257,10 @@ const DataMigrationApp = () => {
   // Reset application
   const reset = () => {
     setOrderFile(null);
-    setResults(null);
+    setResults({
+      customers: [],
+      locations: []
+    });
     setError('');
     // Clear file input
     const input = document.querySelector('input[type="file"]');
@@ -394,26 +301,6 @@ const DataMigrationApp = () => {
         </div>
       </div>
 
-          {/* Verification Progress */}
-          {verifying && (
-            <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <div className="flex items-center mb-2">
-                <Search className="h-5 w-5 text-blue-500 mr-3 animate-spin" />
-                <span className="text-blue-700 font-medium">
-                  Verifying addresses and finding company URLs...
-                </span>
-              </div>
-              <div className="w-full bg-blue-200 rounded-full h-2">
-                <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${(verificationProgress.current / verificationProgress.total) * 100}%` }}
-                ></div>
-              </div>
-              <p className="text-sm text-blue-600 mt-1">
-                {verificationProgress.current} of {verificationProgress.total} completed
-              </p>
-            </div>
-          )}
       {error && (
         <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
           <div className="flex items-center">
@@ -427,32 +314,16 @@ const DataMigrationApp = () => {
       <div className="mb-8 text-center">
         <button
           onClick={processFiles}
-          disabled={!orderFile || processing || verifying}
+          disabled={!orderFile || processing}
           className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-3 px-8 rounded-lg transition-colors"
         >
           {processing ? 'Processing...' : 'Process Orders File'}
         </button>
         
-        {results && !results.verified && (
-          <button
-            onClick={verifyData}
-            disabled={verifying}
-            className="ml-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium py-3 px-8 rounded-lg transition-colors"
-          >
-            {verifying ? 'Verifying...' : (
-              <>
-                <Search className="h-4 w-4 inline mr-2" />
-                Verify Addresses & URLs
-              </>
-            )}
-          </button>
-        )}
-        
         {orderFile && (
           <button
             onClick={reset}
-            disabled={verifying}
-            className="ml-4 bg-gray-500 hover:bg-gray-600 disabled:bg-gray-400 text-white font-medium py-3 px-8 rounded-lg transition-colors"
+            className="ml-4 bg-gray-500 hover:bg-gray-600 text-white font-medium py-3 px-8 rounded-lg transition-colors"
           >
             <X className="h-4 w-4 inline mr-2" />
             Reset
@@ -461,12 +332,12 @@ const DataMigrationApp = () => {
       </div>
 
       {/* Results Section */}
-      {results && (
+      {results.customers.length > 0 && (
         <div className="space-y-8">
           {/* Summary */}
           <div className="bg-green-50 border border-green-200 rounded-lg p-6">
             <h2 className="text-xl font-semibold text-green-800 mb-4">
-              {results.verified ? 'Verification Complete!' : 'Processing Complete!'}
+              Processing Complete!
             </h2>
             <div className="grid md:grid-cols-2 gap-4">
               <div className="flex items-center">
@@ -481,31 +352,7 @@ const DataMigrationApp = () => {
                   <strong>{results.locations.length}</strong> unique locations found
                 </span>
               </div>
-              {results.verified && (
-                <>
-                  <div className="flex items-center">
-                    <CheckCircle className="h-6 w-6 text-green-600 mr-3" />
-                    <span className="text-green-700">
-                      <strong>{results.customers.filter(c => c.Verified === 'Yes').length}</strong> addresses verified
-                    </span>
-                  </div>
-                  <div className="flex items-center">
-                    <Globe className="h-6 w-6 text-green-600 mr-3" />
-                    <span className="text-green-700">
-                      <strong>{results.customers.filter(c => c['URL (Google)']).length}</strong> company URLs found
-                    </span>
-                  </div>
-                </>
-              )}
             </div>
-            {results.verified && (
-              <div className="mt-4 p-3 bg-green-100 rounded">
-                <p className="text-sm text-green-800">
-                  <strong>Note:</strong> Address verification and URL lookup have been completed. 
-                  Verified addresses are marked and company websites have been automatically populated where found.
-                </p>
-              </div>
-            )}
           </div>
 
           {/* Download Section */}
@@ -516,7 +363,7 @@ const DataMigrationApp = () => {
                 <h3 className="text-lg font-semibold text-blue-800">Customer Import Template</h3>
               </div>
               <p className="text-blue-700 mb-4">
-                Download this template{results.verified ? ' with verified addresses and URLs' : ''}, fill in any remaining required fields, then upload to ForgeOS to create customer records.
+                Download this template, fill in any remaining required fields, then upload to ForgeOS to create customer records.
               </p>
               <div className="space-y-2">
                 <button
@@ -525,13 +372,6 @@ const DataMigrationApp = () => {
                 >
                   <Download className="h-4 w-4 inline mr-2" />
                   Download Customer Template
-                </button>
-                <button
-                  onClick={() => showCSVContent(results.customers, 'Customer Import Template')}
-                  className="w-full bg-blue-500 hover:bg-blue-600 text-white font-medium py-1 px-4 rounded transition-colors text-sm"
-                >
-                  <FileText className="h-3 w-3 inline mr-2" />
-                  View/Copy CSV Content
                 </button>
                 <p className="text-xs text-blue-600">
                   {results.customers.length} records • CSV format for Excel
@@ -545,7 +385,7 @@ const DataMigrationApp = () => {
                 <h3 className="text-lg font-semibold text-purple-800">Location Import Template</h3>
               </div>
               <p className="text-purple-700 mb-4">
-                Download this template{results.verified ? ' with verified addresses' : ''}, fill in any remaining required fields, then upload to ForgeOS to create location records.
+                Download this template, fill in any remaining required fields, then upload to ForgeOS to create location records.
               </p>
               <div className="space-y-2">
                 <button
@@ -554,13 +394,6 @@ const DataMigrationApp = () => {
                 >
                   <Download className="h-4 w-4 inline mr-2" />
                   Download Location Template
-                </button>
-                <button
-                  onClick={() => showCSVContent(results.locations, 'Location Import Template')}
-                  className="w-full bg-purple-500 hover:bg-purple-600 text-white font-medium py-1 px-4 rounded transition-colors text-sm"
-                >
-                  <FileText className="h-3 w-3 inline mr-2" />
-                  View/Copy CSV Content
                 </button>
                 <p className="text-xs text-purple-600">
                   {results.locations.length} records • CSV format for Excel
@@ -580,12 +413,6 @@ const DataMigrationApp = () => {
                       <th className="text-left p-2">Customer</th>
                       <th className="text-left p-2">Address</th>
                       <th className="text-left p-2">City, State</th>
-                      {results.verified && (
-                        <>
-                          <th className="text-left p-2">URL</th>
-                          <th className="text-left p-2">Verified</th>
-                        </>
-                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -594,29 +421,6 @@ const DataMigrationApp = () => {
                         <td className="p-2">{customer.Customer}</td>
                         <td className="p-2">{customer['Address 1']}</td>
                         <td className="p-2">{customer.City && customer.State ? `${customer.City}, ${customer.State}` : customer.City || customer.State}</td>
-                        {results.verified && (
-                          <>
-                            <td className="p-2">
-                              {customer['URL (Google)'] ? (
-                                <a href={customer['URL (Google)']} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                                  <Globe className="h-3 w-3 inline mr-1" />
-                                  Link
-                                </a>
-                              ) : (
-                                <span className="text-gray-400">None</span>
-                              )}
-                            </td>
-                            <td className="p-2">
-                              <span className={`px-2 py-1 rounded text-xs ${
-                                customer.Verified === 'Yes' 
-                                  ? 'bg-green-100 text-green-800' 
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }`}>
-                                {customer.Verified}
-                              </span>
-                            </td>
-                          </>
-                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -636,12 +440,6 @@ const DataMigrationApp = () => {
                       <th className="text-left p-2">Customer</th>
                       <th className="text-left p-2">Address</th>
                       <th className="text-left p-2">City, State</th>
-                      {results.verified && (
-                        <>
-                          <th className="text-left p-2">Country</th>
-                          <th className="text-left p-2">Verified</th>
-                        </>
-                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -650,20 +448,6 @@ const DataMigrationApp = () => {
                         <td className="p-2">{location.Customer}</td>
                         <td className="p-2">{location['Address 1']}</td>
                         <td className="p-2">{location.City && location.State ? `${location.City}, ${location.State}` : location.City || location.State}</td>
-                        {results.verified && (
-                          <>
-                            <td className="p-2">{location['Country (Google)']}</td>
-                            <td className="p-2">
-                              <span className={`px-2 py-1 rounded text-xs ${
-                                location.Verified === 'Yes' 
-                                  ? 'bg-green-100 text-green-800' 
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }`}>
-                                {location.Verified}
-                              </span>
-                            </td>
-                          </>
-                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -680,24 +464,10 @@ const DataMigrationApp = () => {
             <h3 className="text-lg font-semibold text-yellow-800 mb-3">Next Steps</h3>
             <ol className="list-decimal list-inside space-y-2 text-yellow-700">
               <li>Download both the Customer Import Template and Location Import Template</li>
-              {!results.verified && (
-                <li className="text-orange-600 font-medium">
-                  <strong>Recommended:</strong> Use the "Verify Addresses & URLs" button to automatically validate addresses and find company websites
-                </li>
-              )}
-              <li>Fill out any remaining required columns in each template{results.verified ? ' (most fields should now be complete)' : ' (URL, Country, etc.)'}</li>
+              <li>Fill out any remaining required columns in each template</li>
               <li>Upload the completed Customer Import Template to ForgeOS to create customer records</li>
               <li>Upload the completed Location Import Template to ForgeOS to create location records</li>
             </ol>
-            {results.verified && (
-              <div className="mt-4 p-3 bg-green-100 rounded">
-                <p className="text-sm text-green-800">
-                  <CheckCircle className="h-4 w-4 inline mr-1" />
-                  <strong>Verification Complete:</strong> Addresses have been validated and company URLs have been automatically populated where possible. 
-                  You may still need to manually verify some entries marked as unverified.
-                </p>
-              </div>
-            )}
           </div>
         </div>
       )}
