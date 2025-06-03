@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback } from 'react';
-import { Upload, Download, FileText, Users, MapPin, AlertCircle, CheckCircle, X, ArrowRight, Package, Phone, Wifi, DollarSign, Calendar, Search } from 'lucide-react';
+import { Upload, Download, FileText, Users, MapPin, AlertCircle, CheckCircle, X, ArrowRight, Package, Phone, Wifi, DollarSign, Calendar, Search, ChevronLeft, Settings, Check, Hash, Globe, Zap, Plus } from 'lucide-react';
 
 const WorkflowApp = () => {
   const [currentStep, setCurrentStep] = useState(1);
@@ -10,7 +10,50 @@ const WorkflowApp = () => {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
   
-  // Column mapping for service file
+  // Enhanced field mapping state
+  const [ordersData, setOrdersData] = useState({ headers: [], data: [] });
+  const [commissionsData, setCommissionsData] = useState({ headers: [], data: [] });
+  const [fullOrdersData, setFullOrdersData] = useState({ headers: [], data: [] });
+  const [fullCommissionsData, setFullCommissionsData] = useState({ headers: [], data: [] });
+  const [fieldMapping, setFieldMapping] = useState({
+    orders: {
+      customerField: '',
+      locationField: '',
+      accountField: '',
+      orderIdField: '',
+      providerField: '',
+      productField: ''
+    },
+    commissions: {
+      customerField: '',
+      providerCustomerField: '',
+      addressField: '',
+      accountField: '',
+      orderIdField: '',
+      providerField: '',
+      serviceField: '',
+      amountField: ''
+    }
+  });
+
+  // Dynamic field mappings
+  const [dynamicMappings, setDynamicMappings] = useState([
+    { id: 'customer', label: 'CUSTOMER', ordersField: 'customerField', commissionsField: 'customerField', required: true, icon: 'users' },
+    { id: 'address', label: 'ADDRESS', ordersField: 'locationField', commissionsField: 'addressField', required: false, icon: 'map-pin' },
+    { id: 'service', label: 'SERVICE', ordersField: 'productField', commissionsField: 'serviceField', required: true, icon: 'package' },
+    { id: 'provider', label: 'PROVIDER', ordersField: 'providerField', commissionsField: 'providerField', required: false, icon: 'globe' },
+    { id: 'account', label: 'ACCOUNT', ordersField: 'accountField', commissionsField: 'accountField', required: false, icon: 'hash' }
+  ]);
+  const [nextMappingId, setNextMappingId] = useState(6);
+
+  // Export field selection state
+  const [exportFields, setExportFields] = useState({
+    orders: new Set(),
+    commissions: new Set()
+  });
+  const [showExportConfig, setShowExportConfig] = useState(false);
+  
+  // Legacy column mapping for compatibility
   const [columnMapping, setColumnMapping] = useState({
     customerColumn: '',
     productColumn: '',
@@ -40,15 +83,18 @@ const WorkflowApp = () => {
     return String(text).trim();
   };
 
-  // Parse CSV content
-  const parseCSV = (content) => {
+  // Parse CSV content with option for full parsing or sample only
+  const parseCSV = (content, fullParse = false) => {
     const lines = content.split('\n').filter(line => line.trim());
     if (lines.length === 0) return { data: [], headers: [] };
     
     const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
     const data = [];
     
-    for (let i = 1; i < lines.length; i++) {
+    // Determine how many rows to process
+    const maxRows = fullParse ? lines.length : Math.min(lines.length, 11);
+    
+    for (let i = 1; i < maxRows; i++) {
       const values = [];
       let current = '';
       let inQuotes = false;
@@ -76,6 +122,123 @@ const WorkflowApp = () => {
     }
     
     return { data, headers };
+  };
+
+  // Auto-detect field mappings based on common patterns
+  const autoDetectFieldMappings = (headers, fileType) => {
+    const detectedMapping = {};
+
+    if (fileType === 'orders') {
+      detectedMapping.customerField = findField(headers, ['customer', 'client', 'company']);
+      detectedMapping.locationField = findField(headers, ['location', 'address', 'site']);
+      detectedMapping.accountField = findField(headers, ['account', 'billing account', 'account number']);
+      detectedMapping.orderIdField = findField(headers, ['order id', 'order', 'order number']);
+      detectedMapping.providerField = findField(headers, ['provider', 'supplier', 'vendor']);
+      detectedMapping.productField = findField(headers, ['product', 'service', 'description']);
+    } else {
+      detectedMapping.customerField = findField(headers, ['customer', 'client', 'company']);
+      detectedMapping.providerCustomerField = findField(headers, ['provider customer', 'account name', 'billing name']);
+      detectedMapping.addressField = findField(headers, ['address', 'site address', 'location']);
+      detectedMapping.accountField = findField(headers, ['account', 'account number', 'billing account']);
+      detectedMapping.orderIdField = findField(headers, ['order id', 'order', 'order number']);
+      detectedMapping.providerField = findField(headers, ['provider', 'supplier', 'vendor']);
+      detectedMapping.serviceField = findField(headers, ['service', 'product', 'description']);
+      detectedMapping.amountField = findField(headers, ['amount', 'net billed', 'revenue', 'commission']);
+    }
+
+    setFieldMapping(prev => ({
+      ...prev,
+      [fileType]: { ...prev[fileType], ...detectedMapping }
+    }));
+  };
+
+  const findField = (headers, patterns) => {
+    return headers.find(header => 
+      patterns.some(pattern => 
+        header.toLowerCase().includes(pattern.toLowerCase())
+      )
+    ) || '';
+  };
+
+  // Toggle export field selection
+  const toggleExportField = (fileType, fieldName) => {
+    setExportFields(prev => {
+      const newSet = new Set(prev[fileType]);
+      if (newSet.has(fieldName)) {
+        newSet.delete(fieldName);
+      } else {
+        newSet.add(fieldName);
+      }
+      return {
+        ...prev,
+        [fileType]: newSet
+      };
+    });
+  };
+
+  // Add new dynamic field mapping
+  const addFieldMapping = () => {
+    const newMapping = {
+      id: `custom_${nextMappingId}`,
+      label: `CUSTOM ${nextMappingId}`,
+      ordersField: `customField${nextMappingId}Orders`,
+      commissionsField: `customField${nextMappingId}Commissions`,
+      required: false,
+      icon: 'zap'
+    };
+    
+    setDynamicMappings(prev => [...prev, newMapping]);
+    setNextMappingId(prev => prev + 1);
+    
+    // Add the new fields to fieldMapping state
+    setFieldMapping(prev => ({
+      orders: { ...prev.orders, [newMapping.ordersField]: '' },
+      commissions: { ...prev.commissions, [newMapping.commissionsField]: '' }
+    }));
+  };
+
+  // Remove dynamic field mapping
+  const removeFieldMapping = (mappingId) => {
+    const mappingToRemove = dynamicMappings.find(m => m.id === mappingId);
+    if (!mappingToRemove || mappingToRemove.required) return;
+    
+    setDynamicMappings(prev => prev.filter(m => m.id !== mappingId));
+    
+    // Remove the fields from fieldMapping state
+    setFieldMapping(prev => {
+      const newOrders = { ...prev.orders };
+      const newCommissions = { ...prev.commissions };
+      delete newOrders[mappingToRemove.ordersField];
+      delete newCommissions[mappingToRemove.commissionsField];
+      return {
+        orders: newOrders,
+        commissions: newCommissions
+      };
+    });
+  };
+
+  // Update dynamic mapping label
+  const updateMappingLabel = (mappingId, newLabel) => {
+    setDynamicMappings(prev => 
+      prev.map(mapping => 
+        mapping.id === mappingId 
+          ? { ...mapping, label: newLabel.toUpperCase() }
+          : mapping
+      )
+    );
+  };
+
+  // Get icon component for mapping
+  const getMappingIcon = (iconType) => {
+    switch (iconType) {
+      case 'users': return <Users className="w-3 h-3" />;
+      case 'map-pin': return <MapPin className="w-3 h-3" />;
+      case 'package': return <Package className="w-3 h-3" />;
+      case 'globe': return <Globe className="w-3 h-3" />;
+      case 'hash': return <Hash className="w-3 h-3" />;
+      case 'zap': return <Zap className="w-3 h-3" />;
+      default: return <Zap className="w-3 h-3" />;
+    }
   };
 
   // Extract customer and location data from parsed CSV (Step 1)
@@ -162,7 +325,7 @@ const WorkflowApp = () => {
     };
   };
 
-  // Enrich locations with service data (Step 2) - matches TelecomServices logic
+  // Enrich locations with service data using enhanced field mapping
   const enrichWithServices = (locations, serviceData) => {
     // Normalize company names for matching
     const normalizeCompanyName = (name) => {
@@ -173,10 +336,10 @@ const WorkflowApp = () => {
         .trim();
     };
 
-    // Use dynamic column mapping
-    const customerCol = columnMapping.customerColumn || 'Customer';
-    const productCol = columnMapping.productColumn || 'Product';
-    const providerCol = columnMapping.providerColumn || 'Provider';
+    // Use enhanced field mapping
+    const customerCol = fieldMapping.commissions.customerField || 'Customer';
+    const productCol = fieldMapping.commissions.serviceField || 'Product';
+    const providerCol = fieldMapping.commissions.providerField || 'Provider';
 
     const locationCustomers = locations.map(loc => {
       const address1 = loc['Address 1'] || '';
@@ -268,66 +431,94 @@ const WorkflowApp = () => {
     return csvRows.join('\n');
   };
 
-  // Handle file uploads
-  const handleOrderFileUpload = useCallback((event) => {
+  // Handle file uploads with enhanced parsing
+  const handleOrderFileUpload = useCallback(async (event) => {
     const file = event.target.files[0];
-    if (file && file.type === 'text/csv') {
-      setOrderFile(file);
-      setError('');
-    } else {
+    if (!file || file.type !== 'text/csv') {
       setError('Please upload a valid CSV file');
+      return;
+    }
+
+    setProcessing(true);
+    setError('');
+
+    try {
+      const content = await file.text();
+      const sampleParsed = parseCSV(content, false); // Sample for preview
+      const fullParsed = parseCSV(content, true); // Full data for processing
+      
+      setOrderFile(file);
+      setOrdersData(sampleParsed); // For preview and field mapping
+      setFullOrdersData(fullParsed); // For actual processing
+      // Auto-detect common field mappings
+      autoDetectFieldMappings(sampleParsed.headers, 'orders');
+    } catch (err) {
+      setError(`Error processing orders file: ${err.message}`);
+    } finally {
+      setProcessing(false);
     }
   }, []);
 
   const handleServiceFileUpload = useCallback(async (event) => {
     const file = event.target.files[0];
-    if (file && file.type === 'text/csv') {
-      setServiceFile(file);
-      setError('');
-
-      // Read file headers for column mapping
-      try {
-        const fileContent = await file.text();
-        const parsed = parseCSV(fileContent);
-        setFileHeaders(parsed.headers || []);
-
-        // Auto-detect common column names
-        const headers = parsed.headers || [];
-        const productColumn = headers.find(h => 
-          h.toLowerCase().includes('product') || 
-          h.toLowerCase().includes('service') ||
-          h.toLowerCase().includes('description')
-        ) || '';
-        const customerColumn = headers.find(h => 
-          h.toLowerCase().includes('customer') || 
-          h.toLowerCase().includes('client') ||
-          h.toLowerCase().includes('company')
-        ) || '';
-        const providerColumn = headers.find(h => 
-          h.toLowerCase().includes('provider') || 
-          h.toLowerCase().includes('vendor') ||
-          h.toLowerCase().includes('supplier') ||
-          h.toLowerCase().includes('carrier')
-        ) || '';
-
-        setColumnMapping({
-          productColumn,
-          customerColumn,
-          providerColumn,
-          addressColumn: ''
-        });
-
-      } catch (error) {
-        console.error('Error reading file headers:', error);
-      }
-    } else {
+    if (!file || file.type !== 'text/csv') {
       setError('Please upload a valid CSV file');
+      return;
+    }
+
+    setProcessing(true);
+    setError('');
+
+    try {
+      const content = await file.text();
+      const sampleParsed = parseCSV(content, false); // Sample for preview
+      const fullParsed = parseCSV(content, true); // Full data for processing
+      
+      setServiceFile(file);
+      setCommissionsData(sampleParsed); // For preview and field mapping
+      setFullCommissionsData(fullParsed); // For actual processing
+      // Auto-detect common field mappings
+      autoDetectFieldMappings(sampleParsed.headers, 'commissions');
+      
+      // Set legacy headers for compatibility
+      setFileHeaders(sampleParsed.headers || []);
+
+      // Auto-detect common column names for legacy support
+      const headers = sampleParsed.headers || [];
+      const productColumn = headers.find(h => 
+        h.toLowerCase().includes('product') || 
+        h.toLowerCase().includes('service') ||
+        h.toLowerCase().includes('description')
+      ) || '';
+      const customerColumn = headers.find(h => 
+        h.toLowerCase().includes('customer') || 
+        h.toLowerCase().includes('client') ||
+        h.toLowerCase().includes('company')
+      ) || '';
+      const providerColumn = headers.find(h => 
+        h.toLowerCase().includes('provider') || 
+        h.toLowerCase().includes('vendor') ||
+        h.toLowerCase().includes('supplier') ||
+        h.toLowerCase().includes('carrier')
+      ) || '';
+
+      setColumnMapping({
+        productColumn,
+        customerColumn,
+        providerColumn,
+        addressColumn: ''
+      });
+
+    } catch (err) {
+      setError(`Error processing commissions file: ${err.message}`);
+    } finally {
+      setProcessing(false);
     }
   }, []);
 
-  // Step 1: Process order file to extract companies
+  // Step 1: Process order file to extract companies (using full dataset)
   const processStep1 = async () => {
-    if (!orderFile) {
+    if (!orderFile || !fullOrdersData.data.length) {
       setError('Please upload an Orders CSV file');
       return;
     }
@@ -336,9 +527,8 @@ const WorkflowApp = () => {
     setError('');
     
     try {
-      const ordersContent = await orderFile.text();
-      const ordersData = parseCSV(ordersContent);
-      const extracted = extractCompanyData(ordersData);
+      // Use the full dataset that was already parsed during upload
+      const extracted = extractCompanyData(fullOrdersData);
       
       setExtractedData(extracted);
       setCurrentStep(2);
@@ -349,15 +539,15 @@ const WorkflowApp = () => {
     }
   };
 
-  // Step 2: Enrich with service data
+  // Step 2: Enrich with service data (using full dataset)
   const processStep2 = async () => {
-    if (!serviceFile) {
+    if (!serviceFile || !fullCommissionsData.data.length) {
       setError('Please upload a Services CSV file');
       return;
     }
 
-    if (!columnMapping.customerColumn || !columnMapping.productColumn) {
-      setShowColumnMapping(true);
+    if (!fieldMapping.commissions.customerField || !fieldMapping.commissions.serviceField) {
+      setError('Please configure customer and service field mappings');
       return;
     }
     
@@ -365,9 +555,8 @@ const WorkflowApp = () => {
     setError('');
     
     try {
-      const serviceContent = await serviceFile.text();
-      const serviceData = parseCSV(serviceContent);
-      const enriched = enrichWithServices(extractedData.locations, serviceData);
+      // Use the full dataset that was already parsed during upload
+      const enriched = enrichWithServices(extractedData.locations, fullCommissionsData);
       
       setEnrichedData(enriched);
       setCurrentStep(3);
@@ -507,11 +696,49 @@ const WorkflowApp = () => {
     setCurrentStep(1);
     setOrderFile(null);
     setServiceFile(null);
+    setOrdersData({ headers: [], data: [] });
+    setCommissionsData({ headers: [], data: [] });
+    setFullOrdersData({ headers: [], data: [] });
+    setFullCommissionsData({ headers: [], data: [] });
     setExtractedData({ customers: [], locations: [] });
     setEnrichedData({ matches: [], unmatched: [] });
     setError('');
     setSearchTerm('');
     setSelectedFilter('all');
+    setExportFields({
+      orders: new Set(),
+      commissions: new Set()
+    });
+    setShowExportConfig(false);
+    setFieldMapping({
+      orders: {
+        customerField: '',
+        locationField: '',
+        accountField: '',
+        orderIdField: '',
+        providerField: '',
+        productField: ''
+      },
+      commissions: {
+        customerField: '',
+        providerCustomerField: '',
+        addressField: '',
+        accountField: '',
+        orderIdField: '',
+        providerField: '',
+        serviceField: '',
+        amountField: ''
+      }
+    });
+    // Reset dynamic mappings to default
+    setDynamicMappings([
+      { id: 'customer', label: 'CUSTOMER', ordersField: 'customerField', commissionsField: 'customerField', required: true, icon: 'users' },
+      { id: 'address', label: 'ADDRESS', ordersField: 'locationField', commissionsField: 'addressField', required: false, icon: 'map-pin' },
+      { id: 'service', label: 'SERVICE', ordersField: 'productField', commissionsField: 'serviceField', required: true, icon: 'package' },
+      { id: 'provider', label: 'PROVIDER', ordersField: 'providerField', commissionsField: 'providerField', required: false, icon: 'globe' },
+      { id: 'account', label: 'ACCOUNT', ordersField: 'accountField', commissionsField: 'accountField', required: false, icon: 'hash' }
+    ]);
+    setNextMappingId(6);
     setColumnMapping({
       customerColumn: '',
       productColumn: '',
@@ -577,9 +804,9 @@ const WorkflowApp = () => {
     <div className="max-w-7xl mx-auto p-6 bg-gray-50 min-h-screen">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-4xl font-bold text-gray-800 mb-2">Data Migration Workflow</h1>
+        <h1 className="text-4xl font-bold text-gray-800 mb-2">Enhanced Data Migration Workflow</h1>
         <p className="text-gray-600">
-          Two-step process: Extract company data from orders, then enrich with service information
+          Two-step process with smart field mapping: Extract company data from orders, then enrich with service information
         </p>
       </div>
 
@@ -592,8 +819,8 @@ const WorkflowApp = () => {
           </div>
           <ArrowRight className="w-5 h-5 text-gray-400" />
           <div className={`flex items-center space-x-2 px-4 py-2 rounded-lg ${currentStep >= 2 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'}`}>
-            <Package className="w-5 h-5" />
-            <span className="font-medium">2. Add Services</span>
+            <Settings className="w-5 h-5" />
+            <span className="font-medium">2. Configure Fields</span>
           </div>
           <ArrowRight className="w-5 h-5 text-gray-400" />
           <div className={`flex items-center space-x-2 px-4 py-2 rounded-lg ${currentStep >= 3 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
@@ -608,118 +835,6 @@ const WorkflowApp = () => {
           <div className="flex items-center">
             <AlertCircle className="h-5 w-5 text-red-500 mr-3" />
             <span className="text-red-700">{error}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Column Mapping Modal */}
-      {showColumnMapping && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Configure Column Mapping</h3>
-            <p className="text-gray-600 mb-6">
-              Select which columns contain the key information for matching services to locations.
-            </p>
-            
-            <div className="space-y-6">
-              <div>
-                <h4 className="font-semibold text-gray-900 mb-3">Service File Column Configuration</h4>
-                
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Customer/Company Column *
-                    </label>
-                    <select
-                      value={columnMapping.customerColumn}
-                      onChange={(e) => setColumnMapping(prev => ({...prev, customerColumn: e.target.value}))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="">Select column...</option>
-                      {fileHeaders.map(header => (
-                        <option key={header} value={header}>{header}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Product/Service Description Column *
-                    </label>
-                    <select
-                      value={columnMapping.productColumn}
-                      onChange={(e) => setColumnMapping(prev => ({...prev, productColumn: e.target.value}))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="">Select column...</option>
-                      {fileHeaders.map(header => (
-                        <option key={header} value={header}>{header}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Provider/Vendor Column (Optional)
-                    </label>
-                    <select
-                      value={columnMapping.providerColumn}
-                      onChange={(e) => setColumnMapping(prev => ({...prev, providerColumn: e.target.value}))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="">Select column...</option>
-                      {fileHeaders.map(header => (
-                        <option key={header} value={header}>{header}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Available Columns
-                    </label>
-                    <div className="p-3 bg-gray-50 rounded-lg max-h-24 overflow-y-auto">
-                      <div className="text-xs text-gray-600 space-y-1">
-                        {fileHeaders.map((header, index) => (
-                          <div key={index} className="truncate">{header}</div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {columnMapping.customerColumn && columnMapping.productColumn && (
-                  <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                    <p className="text-green-800 text-sm">
-                      <strong>Ready to process:</strong> Will match companies using "{columnMapping.customerColumn}" 
-                      and extract services from "{columnMapping.productColumn}"
-                      {columnMapping.providerColumn && ` with provider info from "${columnMapping.providerColumn}"`}.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setShowColumnMapping(false)}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  setShowColumnMapping(false);
-                  if (columnMapping.customerColumn && columnMapping.productColumn) {
-                    processStep2();
-                  }
-                }}
-                disabled={!columnMapping.customerColumn || !columnMapping.productColumn}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-              >
-                Apply & Process
-              </button>
-            </div>
           </div>
         </div>
       )}
@@ -756,6 +871,22 @@ const WorkflowApp = () => {
             </div>
           </div>
 
+          {ordersData.headers.length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <h4 className="font-medium text-blue-900 mb-2">Detected Fields ({ordersData.headers.length})</h4>
+              <div className="max-h-32 overflow-y-auto">
+                <div className="grid grid-cols-3 gap-2 text-sm text-blue-700">
+                  {ordersData.headers.map((header, index) => (
+                    <div key={index} className="truncate">{header}</div>
+                  ))}
+                </div>
+              </div>
+              <p className="text-sm text-blue-600 mt-2">
+                Preview: {ordersData.data.length} rows shown | Total: {fullOrdersData.data.length} rows loaded for processing
+              </p>
+            </div>
+          )}
+
           <div className="text-center">
             <button
               onClick={processStep1}
@@ -778,7 +909,7 @@ const WorkflowApp = () => {
         </div>
       )}
 
-      {/* Step 2: Upload Services File and Enrich Data */}
+      {/* Step 2: Enhanced Field Configuration */}
       {currentStep === 2 && (
         <div className="space-y-6">
           {/* Step 1 Results Summary */}
@@ -818,9 +949,9 @@ const WorkflowApp = () => {
             </div>
           </div>
 
-          {/* Step 2 Upload */}
-          <div className="bg-white rounded-lg shadow-sm border p-8">
-            <h2 className="text-2xl font-semibold text-gray-800 mb-4">Step 2: Add Service Information</h2>
+          {/* Services File Upload */}
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h2 className="text-2xl font-semibold text-gray-800 mb-4">Upload Services/Commission File</h2>
             <p className="text-gray-600 mb-6">
               Upload your services/commissions CSV file to match services with the extracted company locations.
             </p>
@@ -849,30 +980,396 @@ const WorkflowApp = () => {
               </div>
             </div>
 
-            <div className="text-center">
-              <button
-                onClick={() => setShowColumnMapping(true)}
-                disabled={!serviceFile}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-3 px-8 rounded-lg transition-colors mr-4"
-              >
-                Configure Columns
-              </button>
+            {commissionsData.headers.length > 0 && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                <h4 className="font-medium text-green-900 mb-2">Detected Fields ({commissionsData.headers.length})</h4>
+                <div className="max-h-32 overflow-y-auto">
+                  <div className="grid grid-cols-3 gap-2 text-sm text-green-700">
+                    {commissionsData.headers.map((header, index) => (
+                      <div key={index} className="truncate">{header}</div>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-sm text-green-600 mt-2">
+                  Preview: {commissionsData.data.length} rows shown | Total: {fullCommissionsData.data.length} rows loaded for processing
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Enhanced Field Mapping Interface */}
+          {serviceFile && commissionsData.headers.length > 0 && (
+            <div className="bg-white rounded-lg shadow-sm border p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-semibold text-gray-800">Configure Field Mapping</h2>
+                  <p className="text-gray-600 mt-1">Connect related fields between your Orders and Services files. You can add custom field mappings or remove optional ones.</p>
+                </div>
+                <button
+                  onClick={() => setShowExportConfig(!showExportConfig)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors ${
+                    showExportConfig 
+                      ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                      : 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200'
+                  }`}
+                >
+                  <FileText className="w-4 h-4" />
+                  {showExportConfig ? 'Hide Export Fields' : 'Select Export Fields'}
+                </button>
+              </div>
+
+              {/* Mapping Instructions */}
+              <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <h3 className="font-medium text-yellow-900 mb-2">Field Mapping Instructions</h3>
+                <div className="text-sm text-yellow-800 space-y-1">
+                  <p>• <strong>Required fields</strong> (marked with *) must be mapped for the workflow to function</p>
+                  <p>• <strong>Click field names</strong> to edit custom mapping labels</p>
+                  <p>• <strong>Use dropdown numbers</strong> to select corresponding fields from each file</p>
+                  <p>• <strong>Add Field button</strong> creates new custom mappings for additional data connections</p>
+                  <p>• <strong>X button</strong> removes optional field mappings you don't need</p>
+                </div>
+              </div>
+
+              {showExportConfig && (
+                <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                  <h3 className="font-medium text-purple-900 mb-2">Export Field Selection</h3>
+                  <p className="text-sm text-purple-700 mb-3">
+                    Click on field number badges to select which fields to include in your final CSV export. 
+                    Selected fields will have a colored border.
+                  </p>
+                  <div className="flex items-center gap-6 text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 bg-blue-500 rounded-full"></span>
+                      <span>Orders: {exportFields.orders.size} fields selected</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 bg-green-500 rounded-full"></span>
+                      <span>Services: {exportFields.commissions.size} fields selected</span>
+                    </div>
+                    <button
+                      onClick={() => setExportFields({ orders: new Set(), commissions: new Set() })}
+                      className="text-purple-600 hover:text-purple-800 underline"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+              )}
               
-              <button
-                onClick={processStep2}
-                disabled={!serviceFile || processing || !columnMapping.customerColumn || !columnMapping.productColumn}
-                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium py-3 px-8 rounded-lg transition-colors mr-4"
-              >
-                {processing ? 'Processing...' : 'Enrich with Services'}
-              </button>
-              
-              <button
-                onClick={() => setCurrentStep(1)}
-                className="bg-gray-500 hover:bg-gray-600 text-white font-medium py-3 px-8 rounded-lg transition-colors"
-              >
-                Back to Step 1
-              </button>
+              {/* Field Mapping Interface */}
+              <div className="grid grid-cols-5 gap-4 mb-6">
+                {/* Orders Column */}
+                <div className="col-span-2">
+                  <h3 className="text-lg font-medium text-blue-900 mb-4 text-center bg-blue-50 py-2 rounded-lg border border-blue-200">
+                    📋 Orders File Fields
+                  </h3>
+                  <div className="space-y-3">
+                    {ordersData.headers.map((header, index) => (
+                      <div
+                        key={index}
+                        className={`p-3 rounded-lg border text-sm cursor-pointer transition-colors ${
+                          Object.values(fieldMapping.orders).includes(header)
+                            ? 'bg-blue-100 border-blue-300 text-blue-800'
+                            : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                        } ${
+                          exportFields.orders.has(header)
+                            ? 'ring-2 ring-blue-500 ring-offset-1'
+                            : ''
+                        }`}
+                        title={`Sample: ${ordersData.data[0]?.[header] || 'No data'}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (showExportConfig) {
+                                toggleExportField('orders', header);
+                              }
+                            }}
+                            className={`flex-shrink-0 w-6 h-6 text-white text-xs font-bold rounded-full flex items-center justify-center transition-colors ${
+                              showExportConfig
+                                ? exportFields.orders.has(header)
+                                  ? 'bg-blue-600 ring-2 ring-blue-300'
+                                  : 'bg-gray-400 hover:bg-blue-500'
+                                : 'bg-blue-600'
+                            }`}
+                            disabled={!showExportConfig}
+                          >
+                            {index + 1}
+                          </button>
+                          <div className="font-medium flex-1">{header}</div>
+                          {showExportConfig && exportFields.orders.has(header) && (
+                            <Check className="w-4 h-4 text-blue-600" />
+                          )}
+                        </div>
+                        {ordersData.data[0]?.[header] && (
+                          <div className="text-xs text-gray-600 mt-1 ml-8 truncate">
+                            {ordersData.data[0][header]}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Mapping Configuration */}
+                <div className="col-span-1 flex flex-col justify-center">
+                  <div className="space-y-4">
+                    {/* Dynamic Field Mappings */}
+                    {dynamicMappings.map((mapping, index) => (
+                      <div key={mapping.id} className="text-center">
+                        <div className="flex items-center justify-center mb-2">
+                          <div className="flex items-center gap-1">
+                            {getMappingIcon(mapping.icon)}
+                            <input
+                              type="text"
+                              value={mapping.label}
+                              onChange={(e) => updateMappingLabel(mapping.id, e.target.value)}
+                              className="text-xs font-medium text-gray-700 bg-transparent border-none p-0 text-center w-20 focus:ring-1 focus:ring-blue-500 rounded"
+                              disabled={mapping.required}
+                            />
+                            {mapping.required && (
+                              <span className="text-red-500 text-xs">*</span>
+                            )}
+                            {!mapping.required && (
+                              <button
+                                onClick={() => removeFieldMapping(mapping.id)}
+                                className="ml-1 w-4 h-4 text-red-500 hover:text-red-700 transition-colors"
+                                title="Remove this field mapping"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-center">
+                          <select
+                            value={fieldMapping.orders[mapping.ordersField] || ''}
+                            onChange={(e) => setFieldMapping(prev => ({
+                              ...prev,
+                              orders: { ...prev.orders, [mapping.ordersField]: e.target.value }
+                            }))}
+                            className="w-16 px-1 py-1 text-xs border border-gray-300 rounded mr-1"
+                          >
+                            <option value="">-</option>
+                            {ordersData.headers.map((header, headerIndex) => (
+                              <option key={header} value={header}>{headerIndex + 1}</option>
+                            ))}
+                          </select>
+                          <ArrowRight className="w-4 h-4 text-gray-400 mx-1" />
+                          <select
+                            value={fieldMapping.commissions[mapping.commissionsField] || ''}
+                            onChange={(e) => setFieldMapping(prev => ({
+                              ...prev,
+                              commissions: { ...prev.commissions, [mapping.commissionsField]: e.target.value }
+                            }))}
+                            className="w-16 px-1 py-1 text-xs border border-gray-300 rounded ml-1"
+                          >
+                            <option value="">-</option>
+                            {commissionsData.headers.map((header, headerIndex) => (
+                              <option key={header} value={header}>{headerIndex + 1}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Add Field Mapping Button */}
+                    <div className="text-center pt-2 border-t border-gray-200">
+                      <button
+                        onClick={addFieldMapping}
+                        className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-50 border border-blue-200 text-blue-700 rounded hover:bg-blue-100 transition-colors mx-auto"
+                        title="Add a new field mapping"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Add Field
+                      </button>
+                      <p className="text-xs text-gray-500 mt-1">
+                        <span className="text-red-500">*</span> Required fields
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Services Column */}
+                <div className="col-span-2">
+                  <h3 className="text-lg font-medium text-green-900 mb-4 text-center bg-green-50 py-2 rounded-lg border border-green-200">
+                    💰 Services File Fields
+                  </h3>
+                  <div className="space-y-3">
+                    {commissionsData.headers.map((header, index) => (
+                      <div
+                        key={index}
+                        className={`p-3 rounded-lg border text-sm cursor-pointer transition-colors ${
+                          Object.values(fieldMapping.commissions).includes(header)
+                            ? 'bg-green-100 border-green-300 text-green-800'
+                            : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                        } ${
+                          exportFields.commissions.has(header)
+                            ? 'ring-2 ring-green-500 ring-offset-1'
+                            : ''
+                        }`}
+                        title={`Sample: ${commissionsData.data[0]?.[header] || 'No data'}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (showExportConfig) {
+                                toggleExportField('commissions', header);
+                              }
+                            }}
+                            className={`flex-shrink-0 w-6 h-6 text-white text-xs font-bold rounded-full flex items-center justify-center transition-colors ${
+                              showExportConfig
+                                ? exportFields.commissions.has(header)
+                                  ? 'bg-green-600 ring-2 ring-green-300'
+                                  : 'bg-gray-400 hover:bg-green-500'
+                                : 'bg-green-600'
+                            }`}
+                            disabled={!showExportConfig}
+                          >
+                            {index + 1}
+                          </button>
+                          <div className="font-medium flex-1">{header}</div>
+                          {showExportConfig && exportFields.commissions.has(header) && (
+                            <Check className="w-4 h-4 text-green-600" />
+                          )}
+                        </div>
+                        {commissionsData.data[0]?.[header] && (
+                          <div className="text-xs text-gray-600 mt-1 ml-8 truncate">
+                            {commissionsData.data[0][header]}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Additional Service Fields */}
+              <div className="border-t pt-6">
+                <h4 className="font-medium text-gray-900 mb-4">Additional Service Fields (Optional)</h4>
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Amount/Revenue Field</label>
+                    <select
+                      value={fieldMapping.commissions.amountField}
+                      onChange={(e) => setFieldMapping(prev => ({
+                        ...prev,
+                        commissions: { ...prev.commissions, amountField: e.target.value }
+                      }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select field...</option>
+                      {commissionsData.headers.map(header => (
+                        <option key={header} value={header}>{header}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Number Field</label>
+                    <select
+                      value={fieldMapping.commissions.accountField}
+                      onChange={(e) => setFieldMapping(prev => ({
+                        ...prev,
+                        commissions: { ...prev.commissions, accountField: e.target.value }
+                      }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select field...</option>
+                      {commissionsData.headers.map(header => (
+                        <option key={header} value={header}>{header}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Provider Customer Name</label>
+                    <select
+                      value={fieldMapping.commissions.providerCustomerField}
+                      onChange={(e) => setFieldMapping(prev => ({
+                        ...prev,
+                        commissions: { ...prev.commissions, providerCustomerField: e.target.value }
+                      }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select field...</option>
+                      {commissionsData.headers.map(header => (
+                        <option key={header} value={header}>{header}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sample Data Preview */}
+              {fieldMapping.orders.customerField && fieldMapping.commissions.customerField && (
+                <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <h4 className="font-medium text-blue-900 mb-3">Sample Data Preview</h4>
+                  <div className="grid lg:grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <h5 className="font-medium text-blue-800 mb-2">Orders Sample:</h5>
+                      {ordersData.data.slice(0, 2).map((row, index) => (
+                        <div key={index} className="bg-white p-2 rounded border mb-2">
+                          {dynamicMappings.map(mapping => {
+                            const fieldValue = fieldMapping.orders[mapping.ordersField];
+                            if (fieldValue && row[fieldValue]) {
+                              return (
+                                <div key={mapping.id}>
+                                  <strong>{mapping.label}:</strong> {row[fieldValue]}
+                                </div>
+                              );
+                            }
+                            return null;
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                    <div>
+                      <h5 className="font-medium text-blue-800 mb-2">Services Sample:</h5>
+                      {commissionsData.data.slice(0, 2).map((row, index) => (
+                        <div key={index} className="bg-white p-2 rounded border mb-2">
+                          {dynamicMappings.map(mapping => {
+                            const fieldValue = fieldMapping.commissions[mapping.commissionsField];
+                            if (fieldValue && row[fieldValue]) {
+                              return (
+                                <div key={mapping.id}>
+                                  <strong>{mapping.label}:</strong> {row[fieldValue]}
+                                </div>
+                              );
+                            }
+                            return null;
+                          })}
+                          {/* Show additional fields */}
+                          {fieldMapping.commissions.amountField && row[fieldMapping.commissions.amountField] && (
+                            <div><strong>AMOUNT:</strong> {row[fieldMapping.commissions.amountField]}</div>
+                          )}
+                          {fieldMapping.commissions.providerCustomerField && row[fieldMapping.commissions.providerCustomerField] && (
+                            <div><strong>PROVIDER CUSTOMER:</strong> {row[fieldMapping.commissions.providerCustomerField]}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
+          )}
+
+          <div className="flex justify-between">
+            <button
+              onClick={() => setCurrentStep(1)}
+              className="flex items-center gap-2 px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Back to Upload
+            </button>
+            <button
+              onClick={processStep2}
+              disabled={!serviceFile || processing || !fieldMapping.commissions.customerField || !fieldMapping.commissions.serviceField}
+              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium py-2 px-8 rounded-lg transition-colors"
+            >
+              {processing ? 'Processing...' : 'Enrich with Services'}
+            </button>
           </div>
         </div>
       )}
@@ -926,10 +1423,16 @@ const WorkflowApp = () => {
             <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center gap-4">
                 <div className="text-sm text-gray-600">
-                  Data Source: Workflow Processing
+                  Data Source: Enhanced Workflow Processing
                 </div>
               </div>
               <div className="flex gap-2">
+                <button
+                  onClick={() => setCurrentStep(2)}
+                  className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50"
+                >
+                  Back to Configure
+                </button>
                 <button
                   onClick={reset}
                   className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50"
