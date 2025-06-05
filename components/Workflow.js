@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useCallback } from 'react';
-import { Upload, Download, FileText, Users, MapPin, AlertCircle, CheckCircle, X, ArrowRight, Package, Phone, Wifi, DollarSign, Calendar, Search, ChevronLeft, Settings, Check, Hash, Globe, Zap, Plus } from 'lucide-react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Upload, Download, FileText, Users, MapPin, AlertCircle, CheckCircle, X, ArrowRight, Package, Phone, Wifi, DollarSign, Calendar, Search, ChevronLeft, Settings, Check, Hash, Globe, Zap, Plus, AlertTriangle, Eye, Merge, Trash2, RefreshCw } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 const WorkflowApp = () => {
   const [currentStep, setCurrentStep] = useState(1);
@@ -48,8 +49,8 @@ const WorkflowApp = () => {
 
   // Export field selection state
   const [exportFields, setExportFields] = useState({
-    orders: new Set(),
-    commissions: new Set()
+    orders: [],
+    commissions: []
   });
   const [showExportConfig, setShowExportConfig] = useState(false);
   
@@ -77,10 +78,167 @@ const WorkflowApp = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFilter, setSelectedFilter] = useState('all');
 
+  // Duplicate detection state
+  const [duplicates, setDuplicates] = useState({
+    customers: [],
+    locations: []
+  });
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  const [duplicateThreshold, setDuplicateThreshold] = useState(0.8);
+  const [resolvedDuplicates, setResolvedDuplicates] = useState(new Set());
+
   // Helper function to clean and normalize text
   const cleanText = (text) => {
     if (!text || text === null || text === undefined) return '';
     return String(text).trim();
+  };
+
+  // Advanced text normalization for duplicate detection
+  const normalizeForDuplicateDetection = (text) => {
+    if (!text) return '';
+    return text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, '') // Remove punctuation
+      .replace(/\s+/g, ' ') // Normalize spaces
+      .replace(/\b(inc|llc|corp|corporation|company|co|ltd|limited)\b/g, '') // Remove common suffixes
+      .trim();
+  };
+
+  // Calculate Levenshtein distance for fuzzy matching
+  const levenshteinDistance = (str1, str2) => {
+    const matrix = Array(str2.length + 1).fill().map(() => Array(str1.length + 1).fill(0));
+    
+    for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
+    for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
+    
+    for (let j = 1; j <= str2.length; j++) {
+      for (let i = 1; i <= str1.length; i++) {
+        const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+        matrix[j][i] = Math.min(
+          matrix[j - 1][i] + 1,
+          matrix[j][i - 1] + 1,
+          matrix[j - 1][i - 1] + cost
+        );
+      }
+    }
+    
+    return matrix[str2.length][str1.length];
+  };
+
+  // Calculate similarity ratio (0-1)
+  const calculateSimilarity = (str1, str2) => {
+    if (!str1 || !str2) return 0;
+    const normalized1 = normalizeForDuplicateDetection(str1);
+    const normalized2 = normalizeForDuplicateDetection(str2);
+    
+    if (normalized1 === normalized2) return 1;
+    
+    const maxLength = Math.max(normalized1.length, normalized2.length);
+    if (maxLength === 0) return 1;
+    
+    const distance = levenshteinDistance(normalized1, normalized2);
+    return 1 - (distance / maxLength);
+  };
+
+  // Detect duplicates in a dataset
+  const detectDuplicates = (data, keyField, additionalFields = []) => {
+    const duplicateGroups = [];
+    const processed = new Set();
+    
+    for (let i = 0; i < data.length; i++) {
+      if (processed.has(i)) continue;
+      
+      const currentItem = data[i];
+      const currentKey = currentItem[keyField];
+      const currentAddress = currentItem['Address 1'];
+      
+      if (!currentKey || !currentAddress) continue;
+      
+      const similarItems = [{ index: i, item: currentItem, similarity: 1 }];
+      
+      for (let j = i + 1; j < data.length; j++) {
+        if (processed.has(j)) continue;
+        
+        const compareItem = data[j];
+        const compareKey = compareItem[keyField];
+        const compareAddress = compareItem['Address 1'];
+        
+        if (!compareKey || !compareAddress) continue;
+        
+        // Calculate similarity for company name
+        const nameSimilarity = calculateSimilarity(currentKey, compareKey);
+        
+        // Calculate similarity for address
+        const addressSimilarity = calculateSimilarity(currentAddress, compareAddress);
+        
+        // Require both name and address to meet minimum thresholds
+        const NAME_THRESHOLD = 0.8;
+        const ADDRESS_THRESHOLD = 0.7;
+        
+        if (nameSimilarity >= NAME_THRESHOLD && addressSimilarity >= ADDRESS_THRESHOLD) {
+          // Use weighted average of similarities
+          const combinedSimilarity = (nameSimilarity * 0.6) + (addressSimilarity * 0.4);
+          
+          similarItems.push({ 
+            index: j, 
+            item: compareItem, 
+            similarity: combinedSimilarity,
+            details: {
+              nameSimilarity: Math.round(nameSimilarity * 100),
+              addressSimilarity: Math.round(addressSimilarity * 100)
+            }
+          });
+          processed.add(j);
+        }
+      }
+      
+      if (similarItems.length > 1) {
+        duplicateGroups.push({
+          id: `group_${duplicateGroups.length + 1}`,
+          items: similarItems.sort((a, b) => b.similarity - a.similarity),
+          type: keyField,
+          resolved: false
+        });
+      }
+      
+      processed.add(i);
+    }
+    
+    return duplicateGroups;
+  };
+
+  // Analyze duplicates in extracted data
+  const analyzeDuplicates = (customers, locations) => {
+    const customerDuplicates = detectDuplicates(customers, 'Customer', ['Address 1']);
+    const locationDuplicates = detectDuplicates(locations, 'Customer', ['Address 1']);
+    
+    setDuplicates({
+      customers: customerDuplicates,
+      locations: locationDuplicates
+    });
+    
+    return {
+      customerDuplicates,
+      locationDuplicates,
+      totalDuplicateGroups: customerDuplicates.length + locationDuplicates.length
+    };
+  };
+
+  // Merge duplicate items
+  const mergeDuplicateGroup = (groupId, selectedIndices, mergedData) => {
+    // Implementation would depend on the specific merge strategy
+    // For now, we'll mark the group as resolved
+    setResolvedDuplicates(prev => new Set([...prev, groupId]));
+    
+    // Update the duplicates to mark this group as resolved
+    setDuplicates(prev => ({
+      customers: prev.customers.map(group => 
+        group.id === groupId ? { ...group, resolved: true, mergedData } : group
+      ),
+      locations: prev.locations.map(group => 
+        group.id === groupId ? { ...group, resolved: true, mergedData } : group
+      )
+    }));
   };
 
   // Parse CSV content with option for full parsing or sample only
@@ -124,6 +282,96 @@ const WorkflowApp = () => {
     return { data, headers };
   };
 
+  // Parse Excel content with option for full parsing or sample only
+  const parseExcel = async (file, fullParse = false) => {
+    try {
+      // Read file as array buffer
+      const arrayBuffer = await file.arrayBuffer();
+      
+      // Parse the workbook
+      const workbook = XLSX.read(arrayBuffer, {
+        type: 'array',
+        cellDates: true,
+        cellNF: true,
+        cellStyles: true
+      });
+      
+      // Get the first worksheet
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      
+      // Convert to JSON with headers
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+        header: 1,
+        defval: '',
+        raw: false
+      });
+      
+      if (jsonData.length === 0) return { data: [], headers: [] };
+      
+      // Extract headers from first row
+      const headers = jsonData[0].map(h => String(h || '').trim()).filter(h => h);
+      if (headers.length === 0) return { data: [], headers: [] };
+      
+      // Process data rows
+      const maxRows = fullParse ? jsonData.length : Math.min(jsonData.length, 11);
+      const data = [];
+      
+      for (let i = 1; i < maxRows; i++) {
+        const row = {};
+        const rowData = jsonData[i] || [];
+        
+        headers.forEach((header, index) => {
+          let cellValue = rowData[index];
+          
+          // Handle different cell types
+          if (cellValue === null || cellValue === undefined) {
+            cellValue = '';
+          } else if (typeof cellValue === 'number') {
+            cellValue = cellValue.toString();
+          } else if (cellValue instanceof Date) {
+            cellValue = cellValue.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+          } else {
+            cellValue = String(cellValue).trim();
+          }
+          
+          row[header] = cellValue;
+        });
+        
+        // Only add row if it has at least some data
+        if (Object.values(row).some(val => val !== '')) {
+          data.push(row);
+        }
+      }
+      
+      return { data, headers };
+    } catch (error) {
+      console.error('Excel parsing error:', error);
+      throw new Error(`Failed to parse Excel file: ${error.message}`);
+    }
+  };
+
+  // Generic file parser that handles both CSV and Excel
+  const parseFile = async (file, fullParse = false) => {
+    const fileName = file.name.toLowerCase();
+    const fileType = file.type;
+    
+    // Detect file type
+    if (fileType === 'text/csv' || fileName.endsWith('.csv')) {
+      const content = await file.text();
+      return parseCSV(content, fullParse);
+    } else if (
+      fileType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      fileType === 'application/vnd.ms-excel' ||
+      fileName.endsWith('.xlsx') ||
+      fileName.endsWith('.xls')
+    ) {
+      return await parseExcel(file, fullParse);
+    } else {
+      throw new Error('Unsupported file type. Please upload a CSV or Excel file.');
+    }
+  };
+
   // Auto-detect field mappings based on common patterns
   const autoDetectFieldMappings = (headers, fileType) => {
     const detectedMapping = {};
@@ -163,15 +411,18 @@ const WorkflowApp = () => {
   // Toggle export field selection
   const toggleExportField = (fileType, fieldName) => {
     setExportFields(prev => {
-      const newSet = new Set(prev[fileType]);
-      if (newSet.has(fieldName)) {
-        newSet.delete(fieldName);
+      const currentFields = [...prev[fileType]];
+      const index = currentFields.indexOf(fieldName);
+      
+      if (index === -1) {
+        currentFields.push(fieldName);
       } else {
-        newSet.add(fieldName);
+        currentFields.splice(index, 1);
       }
+      
       return {
         ...prev,
-        [fileType]: newSet
+        [fileType]: currentFields
       };
     });
   };
@@ -434,8 +685,23 @@ const WorkflowApp = () => {
   // Handle file uploads with enhanced parsing
   const handleOrderFileUpload = useCallback(async (event) => {
     const file = event.target.files[0];
-    if (!file || file.type !== 'text/csv') {
-      setError('Please upload a valid CSV file');
+    if (!file) {
+      setError('Please select a file');
+      return;
+    }
+
+    const fileName = file.name.toLowerCase();
+    const fileType = file.type;
+    const isValidFile = 
+      fileType === 'text/csv' || 
+      fileName.endsWith('.csv') ||
+      fileType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      fileType === 'application/vnd.ms-excel' ||
+      fileName.endsWith('.xlsx') ||
+      fileName.endsWith('.xls');
+
+    if (!isValidFile) {
+      setError('Please upload a valid CSV or Excel file (.csv, .xlsx, .xls)');
       return;
     }
 
@@ -443,9 +709,8 @@ const WorkflowApp = () => {
     setError('');
 
     try {
-      const content = await file.text();
-      const sampleParsed = parseCSV(content, false); // Sample for preview
-      const fullParsed = parseCSV(content, true); // Full data for processing
+      const sampleParsed = await parseFile(file, false); // Sample for preview
+      const fullParsed = await parseFile(file, true); // Full data for processing
       
       setOrderFile(file);
       setOrdersData(sampleParsed); // For preview and field mapping
@@ -461,8 +726,23 @@ const WorkflowApp = () => {
 
   const handleServiceFileUpload = useCallback(async (event) => {
     const file = event.target.files[0];
-    if (!file || file.type !== 'text/csv') {
-      setError('Please upload a valid CSV file');
+    if (!file) {
+      setError('Please select a file');
+      return;
+    }
+
+    const fileName = file.name.toLowerCase();
+    const fileType = file.type;
+    const isValidFile = 
+      fileType === 'text/csv' || 
+      fileName.endsWith('.csv') ||
+      fileType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      fileType === 'application/vnd.ms-excel' ||
+      fileName.endsWith('.xlsx') ||
+      fileName.endsWith('.xls');
+
+    if (!isValidFile) {
+      setError('Please upload a valid CSV or Excel file (.csv, .xlsx, .xls)');
       return;
     }
 
@@ -470,9 +750,8 @@ const WorkflowApp = () => {
     setError('');
 
     try {
-      const content = await file.text();
-      const sampleParsed = parseCSV(content, false); // Sample for preview
-      const fullParsed = parseCSV(content, true); // Full data for processing
+      const sampleParsed = await parseFile(file, false); // Sample for preview
+      const fullParsed = await parseFile(file, true); // Full data for processing
       
       setServiceFile(file);
       setCommissionsData(sampleParsed); // For preview and field mapping
@@ -519,7 +798,7 @@ const WorkflowApp = () => {
   // Step 1: Process order file to extract companies (using full dataset)
   const processStep1 = async () => {
     if (!orderFile || !fullOrdersData.data.length) {
-      setError('Please upload an Orders CSV file');
+      setError('Please upload an Orders CSV or Excel file');
       return;
     }
     
@@ -530,8 +809,16 @@ const WorkflowApp = () => {
       // Use the full dataset that was already parsed during upload
       const extracted = extractCompanyData(fullOrdersData);
       
+      // Analyze duplicates
+      const duplicateAnalysis = analyzeDuplicates(extracted.customers, extracted.locations);
+      
       setExtractedData(extracted);
       setCurrentStep(2);
+      
+      // Show duplicate notification if duplicates found
+      if (duplicateAnalysis.totalDuplicateGroups > 0) {
+        // Could show a toast notification here
+      }
     } catch (err) {
       setError(`Error processing file: ${err.message}`);
     } finally {
@@ -542,7 +829,7 @@ const WorkflowApp = () => {
   // Step 2: Enrich with service data (using full dataset)
   const processStep2 = async () => {
     if (!serviceFile || !fullCommissionsData.data.length) {
-      setError('Please upload a Services CSV file');
+      setError('Please upload a Services CSV or Excel file');
       return;
     }
 
@@ -702,12 +989,15 @@ const WorkflowApp = () => {
     setFullCommissionsData({ headers: [], data: [] });
     setExtractedData({ customers: [], locations: [] });
     setEnrichedData({ matches: [], unmatched: [] });
+    setDuplicates({ customers: [], locations: [] });
+    setResolvedDuplicates(new Set());
+    setShowDuplicates(false);
     setError('');
     setSearchTerm('');
     setSelectedFilter('all');
     setExportFields({
-      orders: new Set(),
-      commissions: new Set()
+      orders: [],
+      commissions: []
     });
     setShowExportConfig(false);
     setFieldMapping({
@@ -800,13 +1090,31 @@ const WorkflowApp = () => {
     return dataToFilter;
   };
 
+  useEffect(() => {
+    console.log('Export Fields Updated:', {
+      orders: Array.from(exportFields.orders),
+      commissions: Array.from(exportFields.commissions)
+    });
+  }, [exportFields]);
+
+  // Get total duplicate groups count for notifications
+  const getTotalDuplicateGroups = () => {
+    return duplicates.customers.length + duplicates.locations.length;
+  };
+
+  const getUnresolvedDuplicateGroups = () => {
+    const unresolvedCustomers = duplicates.customers.filter(group => !resolvedDuplicates.has(group.id));
+    const unresolvedLocations = duplicates.locations.filter(group => !resolvedDuplicates.has(group.id));
+    return unresolvedCustomers.length + unresolvedLocations.length;
+  };
+
   return (
     <div className="max-w-7xl mx-auto p-6 bg-gray-50 min-h-screen">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-4xl font-bold text-gray-800 mb-2">Enhanced Data Migration Workflow</h1>
         <p className="text-gray-600">
-          Two-step process with smart field mapping: Extract company data from orders, then enrich with service information
+          Two-step process with smart field mapping and duplicate detection: Extract company data from orders, then enrich with service information (supports CSV and Excel files)
         </p>
       </div>
 
@@ -830,6 +1138,32 @@ const WorkflowApp = () => {
         </div>
       </div>
 
+      {/* Duplicate Detection Notification */}
+      {currentStep >= 2 && getTotalDuplicateGroups() > 0 && (
+        <div className="mb-6 bg-orange-50 border border-orange-200 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <AlertTriangle className="h-5 w-5 text-orange-500 mr-3" />
+              <div>
+                <span className="text-orange-700 font-medium">
+                  Potential duplicates detected: {getUnresolvedDuplicateGroups()} groups need review
+                </span>
+                <p className="text-orange-600 text-sm mt-1">
+                  Review and resolve duplicates to ensure data quality
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowDuplicates(!showDuplicates)}
+              className="flex items-center gap-2 px-4 py-2 bg-orange-100 text-orange-800 rounded-lg hover:bg-orange-200 transition-colors"
+            >
+              <Eye className="w-4 h-4" />
+              {showDuplicates ? 'Hide' : 'Review'} Duplicates
+            </button>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
           <div className="flex items-center">
@@ -839,12 +1173,158 @@ const WorkflowApp = () => {
         </div>
       )}
 
+      {/* Duplicate Detection Panel */}
+      {showDuplicates && (
+        <div className="mb-6 bg-white rounded-lg shadow-sm border p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-semibold text-gray-800">Duplicate Detection & Resolution</h2>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-700">Similarity Threshold:</label>
+                <select
+                  value={duplicateThreshold}
+                  onChange={(e) => {
+                    setDuplicateThreshold(parseFloat(e.target.value));
+                    // Re-analyze duplicates with new threshold
+                    if (extractedData.customers.length > 0) {
+                      analyzeDuplicates(extractedData.customers, extractedData.locations);
+                    }
+                  }}
+                  className="px-3 py-1 text-sm border border-gray-300 rounded"
+                >
+                  <option value={0.7}>70% - Loose matching</option>
+                  <option value={0.8}>80% - Balanced</option>
+                  <option value={0.9}>90% - Strict matching</option>
+                  <option value={0.95}>95% - Very strict</option>
+                </select>
+              </div>
+              <button
+                onClick={() => setShowDuplicates(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {getTotalDuplicateGroups() === 0 ? (
+            <div className="text-center py-8">
+              <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No Duplicates Found</h3>
+              <p className="text-gray-600">All company and location records appear to be unique at the current similarity threshold.</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Customer Duplicates */}
+              {duplicates.customers.length > 0 && (
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Customer Duplicates ({duplicates.customers.length} groups)</h3>
+                  <div className="space-y-4">
+                    {duplicates.customers.map((group) => (
+                      <div key={group.id} className={`border rounded-lg p-4 ${group.resolved ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-medium text-gray-900">
+                            Duplicate Group {group.id} - {group.items.length} similar records
+                          </h4>
+                          {group.resolved ? (
+                            <span className="flex items-center gap-1 text-green-700 text-sm">
+                              <CheckCircle className="w-4 h-4" />
+                              Resolved
+                            </span>
+                          ) : (
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => mergeDuplicateGroup(group.id, [], null)}
+                                className="flex items-center gap-1 px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                              >
+                                <Merge className="w-3 h-3" />
+                                Mark Resolved
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          {group.items.map((item, index) => (
+                            <div key={index} className="flex items-center justify-between p-3 bg-white rounded border">
+                              <div>
+                                <p className="font-medium">{item.item.Customer}</p>
+                                <p className="text-sm text-gray-600">{item.item['Address 1']}</p>
+                                <p className="text-sm text-gray-500">{item.item.City}, {item.item.State}</p>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-sm font-medium text-blue-600">
+                                  {Math.round(item.similarity * 100)}% match
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Location Duplicates */}
+              {duplicates.locations.length > 0 && (
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Location Duplicates ({duplicates.locations.length} groups)</h3>
+                  <div className="space-y-4">
+                    {duplicates.locations.map((group) => (
+                      <div key={group.id} className={`border rounded-lg p-4 ${group.resolved ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-medium text-gray-900">
+                            Duplicate Group {group.id} - {group.items.length} similar records
+                          </h4>
+                          {group.resolved ? (
+                            <span className="flex items-center gap-1 text-green-700 text-sm">
+                              <CheckCircle className="w-4 h-4" />
+                              Resolved
+                            </span>
+                          ) : (
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => mergeDuplicateGroup(group.id, [], null)}
+                                className="flex items-center gap-1 px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                              >
+                                <Merge className="w-3 h-3" />
+                                Mark Resolved
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          {group.items.map((item, index) => (
+                            <div key={index} className="flex items-center justify-between p-3 bg-white rounded border">
+                              <div>
+                                <p className="font-medium">{item.item.Customer}</p>
+                                <p className="text-sm text-gray-600">{item.item['Address 1']}</p>
+                                <p className="text-sm text-gray-500">{item.item.City}, {item.item.State}</p>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-sm font-medium text-blue-600">
+                                  {Math.round(item.similarity * 100)}% match
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Step 1: Upload Orders File and Extract Companies */}
       {currentStep === 1 && (
         <div className="bg-white rounded-lg shadow-sm border p-8 mb-6">
           <h2 className="text-2xl font-semibold text-gray-800 mb-4">Step 1: Extract Company Data</h2>
           <p className="text-gray-600 mb-6">
-            Upload your orders/customers CSV file to extract unique company names and addresses.
+            Upload your orders/customers CSV or Excel file to extract unique company names and addresses. The system will automatically detect potential duplicates.
           </p>
           
           <div className="max-w-md mx-auto mb-6">
@@ -855,12 +1335,12 @@ const WorkflowApp = () => {
                   <span className="text-xl font-medium text-gray-700">Upload Orders/Customer File</span>
                   <input
                     type="file"
-                    accept=".csv"
+                    accept=".csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
                     onChange={handleOrderFileUpload}
                     className="hidden"
                   />
                 </label>
-                <p className="text-sm text-gray-500 mt-2">CSV format with Customer, Address, City, State columns</p>
+                <p className="text-sm text-gray-500 mt-2">CSV or Excel format (.csv, .xlsx, .xls) with Customer, Address, City, State columns</p>
                 {orderFile && (
                   <div className="mt-4 flex items-center justify-center text-green-600">
                     <CheckCircle className="h-5 w-5 mr-2" />
@@ -917,7 +1397,7 @@ const WorkflowApp = () => {
             <h2 className="text-xl font-semibold text-green-800 mb-4">
               Step 1 Complete!
             </h2>
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid md:grid-cols-3 gap-4">
               <div className="flex items-center">
                 <Users className="h-6 w-6 text-green-600 mr-3" />
                 <span className="text-green-700">
@@ -928,6 +1408,12 @@ const WorkflowApp = () => {
                 <MapPin className="h-6 w-6 text-green-600 mr-3" />
                 <span className="text-green-700">
                   <strong>{extractedData.locations.length}</strong> unique locations extracted
+                </span>
+              </div>
+              <div className="flex items-center">
+                <AlertTriangle className="h-6 w-6 text-orange-500 mr-3" />
+                <span className="text-orange-700">
+                  <strong>{getTotalDuplicateGroups()}</strong> potential duplicate groups found
                 </span>
               </div>
             </div>
@@ -946,6 +1432,15 @@ const WorkflowApp = () => {
                 <Download className="h-4 w-4 inline mr-1" />
                 Download Locations
               </button>
+              {getTotalDuplicateGroups() > 0 && (
+                <button
+                  onClick={() => setShowDuplicates(true)}
+                  className="text-sm bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded transition-colors"
+                >
+                  <AlertTriangle className="h-4 w-4 inline mr-1" />
+                  Review Duplicates
+                </button>
+              )}
             </div>
           </div>
 
@@ -953,7 +1448,7 @@ const WorkflowApp = () => {
           <div className="bg-white rounded-lg shadow-sm border p-6">
             <h2 className="text-2xl font-semibold text-gray-800 mb-4">Upload Services/Commission File</h2>
             <p className="text-gray-600 mb-6">
-              Upload your services/commissions CSV file to match services with the extracted company locations.
+              Upload your services/commissions CSV or Excel file to match services with the extracted company locations.
             </p>
             
             <div className="max-w-md mx-auto mb-6">
@@ -964,12 +1459,12 @@ const WorkflowApp = () => {
                     <span className="text-xl font-medium text-gray-700">Upload Services/Commission File</span>
                     <input
                       type="file"
-                      accept=".csv"
+                      accept=".csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
                       onChange={handleServiceFileUpload}
                       className="hidden"
                     />
                   </label>
-                  <p className="text-sm text-gray-500 mt-2">CSV format with Customer, Product/Service, Provider columns</p>
+                  <p className="text-sm text-gray-500 mt-2">CSV or Excel format (.csv, .xlsx, .xls) with Customer, Product/Service, Provider columns</p>
                   {serviceFile && (
                     <div className="mt-4 flex items-center justify-center text-green-600">
                       <CheckCircle className="h-5 w-5 mr-2" />
@@ -1040,14 +1535,14 @@ const WorkflowApp = () => {
                   <div className="flex items-center gap-6 text-sm">
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 bg-blue-500 rounded-full"></span>
-                      <span>Orders: {exportFields.orders.size} fields selected</span>
+                      <span>Orders: {exportFields.orders.length} fields selected</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 bg-green-500 rounded-full"></span>
-                      <span>Services: {exportFields.commissions.size} fields selected</span>
+                      <span>Services: {exportFields.commissions.length} fields selected</span>
                     </div>
                     <button
-                      onClick={() => setExportFields({ orders: new Set(), commissions: new Set() })}
+                      onClick={() => setExportFields({ orders: [], commissions: [] })}
                       className="text-purple-600 hover:text-purple-800 underline"
                     >
                       Clear All
@@ -1072,7 +1567,7 @@ const WorkflowApp = () => {
                             ? 'bg-blue-100 border-blue-300 text-blue-800'
                             : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
                         } ${
-                          exportFields.orders.has(header)
+                          exportFields.orders.includes(header)
                             ? 'ring-2 ring-blue-500 ring-offset-1'
                             : ''
                         }`}
@@ -1081,6 +1576,7 @@ const WorkflowApp = () => {
                         <div className="flex items-center gap-2">
                           <button
                             onClick={(e) => {
+                              e.preventDefault();
                               e.stopPropagation();
                               if (showExportConfig) {
                                 toggleExportField('orders', header);
@@ -1088,7 +1584,7 @@ const WorkflowApp = () => {
                             }}
                             className={`flex-shrink-0 w-6 h-6 text-white text-xs font-bold rounded-full flex items-center justify-center transition-colors ${
                               showExportConfig
-                                ? exportFields.orders.has(header)
+                                ? exportFields.orders.includes(header)
                                   ? 'bg-blue-600 ring-2 ring-blue-300'
                                   : 'bg-gray-400 hover:bg-blue-500'
                                 : 'bg-blue-600'
@@ -1098,7 +1594,7 @@ const WorkflowApp = () => {
                             {index + 1}
                           </button>
                           <div className="font-medium flex-1">{header}</div>
-                          {showExportConfig && exportFields.orders.has(header) && (
+                          {showExportConfig && exportFields.orders.includes(header) && (
                             <Check className="w-4 h-4 text-blue-600" />
                           )}
                         </div>
@@ -1205,7 +1701,7 @@ const WorkflowApp = () => {
                             ? 'bg-green-100 border-green-300 text-green-800'
                             : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
                         } ${
-                          exportFields.commissions.has(header)
+                          exportFields.commissions.includes(header)
                             ? 'ring-2 ring-green-500 ring-offset-1'
                             : ''
                         }`}
@@ -1214,6 +1710,7 @@ const WorkflowApp = () => {
                         <div className="flex items-center gap-2">
                           <button
                             onClick={(e) => {
+                              e.preventDefault();
                               e.stopPropagation();
                               if (showExportConfig) {
                                 toggleExportField('commissions', header);
@@ -1221,7 +1718,7 @@ const WorkflowApp = () => {
                             }}
                             className={`flex-shrink-0 w-6 h-6 text-white text-xs font-bold rounded-full flex items-center justify-center transition-colors ${
                               showExportConfig
-                                ? exportFields.commissions.has(header)
+                                ? exportFields.commissions.includes(header)
                                   ? 'bg-green-600 ring-2 ring-green-300'
                                   : 'bg-gray-400 hover:bg-green-500'
                                 : 'bg-green-600'
@@ -1231,7 +1728,7 @@ const WorkflowApp = () => {
                             {index + 1}
                           </button>
                           <div className="font-medium flex-1">{header}</div>
-                          {showExportConfig && exportFields.commissions.has(header) && (
+                          {showExportConfig && exportFields.commissions.includes(header) && (
                             <Check className="w-4 h-4 text-green-600" />
                           )}
                         </div>
@@ -1425,6 +1922,15 @@ const WorkflowApp = () => {
                 <div className="text-sm text-gray-600">
                   Data Source: Enhanced Workflow Processing
                 </div>
+                {getTotalDuplicateGroups() > 0 && (
+                  <button
+                    onClick={() => setShowDuplicates(true)}
+                    className="flex items-center gap-1 text-sm text-orange-600 hover:text-orange-800"
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                    {getUnresolvedDuplicateGroups()} duplicates to review
+                  </button>
+                )}
               </div>
               <div className="flex gap-2">
                 <button
