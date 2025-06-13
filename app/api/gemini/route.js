@@ -9,21 +9,16 @@ export async function POST(request) {
             return NextResponse.json({ error: 'API key required' }, { status: 400 });
         }
 
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-                'anthropic-version': '2023-06-01',
             },
             body: JSON.stringify({
-                model: 'claude-3-haiku-20240307',
-                max_tokens: 1024,
-                temperature: 0.1,
-                messages: [
+                contents: [
                     {
                         role: 'user',
-                        content: prompt,
+                        parts: [{ text: prompt }],
                     },
                 ],
             }),
@@ -33,7 +28,7 @@ export async function POST(request) {
             const errorData = await response.json().catch(() => ({}));
             return NextResponse.json(
                 {
-                    error: `Claude API error: ${response.status} - ${errorData.error?.message || 'Unknown error'
+                    error: `Gemini API error: ${response.status} - ${errorData.error?.message || 'Unknown error'
                         }`,
                 },
                 { status: response.status }
@@ -43,17 +38,18 @@ export async function POST(request) {
         const data = await response.json();
 
         if (
-            !data.content ||
-            !Array.isArray(data.content) ||
-            !data.content[0]?.text
+            !data.candidates ||
+            !Array.isArray(data.candidates) ||
+            !data.candidates[0]?.content?.parts[0]?.text
         ) {
             return NextResponse.json(
-                { error: 'Invalid response from Claude API' },
+                { error: 'Invalid response from Gemini API' },
                 { status: 500 }
             );
         }
 
-        return NextResponse.json({ text: data.content[0].text });
+        return NextResponse.json({ text: data.candidates[0].content.parts[0].text });
+
     } catch (error) {
         console.error('Proxy error:', error);
         return NextResponse.json(

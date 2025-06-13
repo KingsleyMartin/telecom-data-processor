@@ -231,8 +231,8 @@ const downloadCSV = (data, filename) => {
 // TEMPORARY: CORS proxy solution (DEVELOPMENT ONLY)
 // ⚠️ WARNING: Never use this in production - exposes your API key!
 
-const callClaudeAPI = async (prompt, apiKey) => {
-  const response = await fetch('/api/claude', {
+const callGeminiAPI = async (prompt, apiKey) => {
+  const response = await fetch('/api/gemini', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -242,13 +242,13 @@ const callClaudeAPI = async (prompt, apiKey) => {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(`Claude API error: ${response.status} - ${errorData.error || 'Unknown error'}`);
+    throw new Error(`Gemini API error: ${response.status} - ${errorData.error || 'Unknown error'}`);
   }
 
   const data = await response.json();
 
   if (!data.text) {
-    throw new Error('Invalid response from Claude API');
+    throw new Error('Invalid response from Gemini API');
   }
 
   return data.text;
@@ -313,7 +313,7 @@ Return format (valid JSON only):
   }
 
   try {
-    const response = await callClaudeAPI(prompt, apiKey);
+    const response = await callGeminiAPI(prompt, apiKey);
 
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
