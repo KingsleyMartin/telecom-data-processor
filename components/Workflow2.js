@@ -4,9 +4,8 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Upload, Download, FileText, Users, MapPin, AlertCircle, CheckCircle, X, ArrowRight, Search, ChevronLeft, Check, AlertTriangle, Eye, Trash2, RefreshCw, Settings, Zap, Database } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-// ===== SERVICES AND UTILITIES =====
+// ===== SERVICES =====
 
-// Address Cache Service
 class AddressCache {
   constructor(maxSize = 5000, ttl = 24 * 60 * 60 * 1000) {
     this.cache = new Map();
@@ -99,10 +98,8 @@ class AddressCache {
   }
 }
 
-// Global cache instance
 const addressCache = new AddressCache();
 
-// API Service
 const apiService = {
   async callGeminiWithRetry(prompt, apiKey, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -145,7 +142,6 @@ const apiService = {
   }
 };
 
-// Address Cleaning Service
 const addressService = {
   async cleanWithAI(addressInput, apiKey) {
     const cacheKey = addressCache.generateKey(addressInput);
@@ -156,7 +152,7 @@ const addressService = {
 
     let prompt;
     if (typeof addressInput === 'string') {
-      prompt = `Parse and standardize this single-line address. Return ONLY a JSON object with the cleaned data:
+      prompt = `Parse and standardize this address. Return ONLY valid JSON:
 
 Input: "${addressInput}"
 
@@ -178,7 +174,7 @@ Return format (valid JSON only):
 }`;
     } else {
       const { address1, address2, city, state, zipCode } = addressInput;
-      prompt = `Clean and standardize this address. Return ONLY a JSON object:
+      prompt = `Clean and standardize this address. Return ONLY valid JSON:
 
 Input:
 - Address 1: "${address1 || ''}"
@@ -265,22 +261,10 @@ Return format (valid JSON only):
   }
 };
 
-// Data Processing Service
 const dataService = {
   cleanText(text) {
     if (!text || text === null || text === undefined) return '';
     return String(text).trim();
-  },
-
-  generateLocationKey(location) {
-    if (!location) return '';
-    const components = [
-      location['Address 1'],
-      location['City'],
-      location['State'],
-      location['Zip Code']
-    ].map(component => (component || '').toLowerCase().trim());
-    return components.join('_');
   },
 
   arrayToCSV(data) {
@@ -323,9 +307,8 @@ const dataService = {
   }
 };
 
-// ===== CUSTOM HOOKS =====
+// ===== HOOKS =====
 
-// File Parser Hook
 const useFileParser = () => {
   const parseCSV = useCallback((content, fullParse = false) => {
     const lines = content.split('\n').filter(line => line.trim());
@@ -413,9 +396,7 @@ const useFileParser = () => {
   return { parseFile };
 };
 
-// Duplicate Detection Hook
 const useDuplicateDetection = () => {
-  // Base similarity calculation functions
   const normalizeForDuplicateDetection = useCallback((str) => {
     return str.toLowerCase()
       .replace(/[^\w\s]/g, '')
@@ -456,7 +437,6 @@ const useDuplicateDetection = () => {
     return 1 - (distance / maxLength);
   }, [normalizeForDuplicateDetection, levenshteinDistance]);
 
-  // Single implementation of validation functions
   const validateCustomerNameMatch = useCallback((name1, name2) => {
     if (!name1 || !name2) return false;
 
@@ -472,23 +452,17 @@ const useDuplicateDetection = () => {
       .replace(/\s+/g, ' ')
       .trim();
 
-    // Split into significant words (longer than 2 chars)
     const words1 = clean1.split(/\s+/).filter(w => w.length > 2);
     const words2 = clean2.split(/\s+/).filter(w => w.length > 2);
 
-    // For very short names, require exact match
     if (words1.length <= 1 || words2.length <= 1) {
       return clean1 === clean2;
     }
 
-    // Calculate word overlap
     const matchingWords = words1.filter(word => words2.includes(word));
     const overlapRatio = matchingWords.length / Math.max(words1.length, words2.length);
-
-    // Calculate string similarity
     const similarity = calculateSimilarity(clean1, clean2);
 
-    // Require both high word overlap AND string similarity
     return overlapRatio >= 0.75 && similarity >= 0.85;
   }, [calculateSimilarity]);
 
@@ -511,7 +485,6 @@ const useDuplicateDetection = () => {
     return similarity >= threshold;
   }, [calculateSimilarity]);
 
-  // Single implementation of ID generation
   const generateDeterministicId = useCallback((items, type) => {
     const uniqueString = items.map(item => {
       const { 'Customer Name': name, 'Address 1': addr1, 'City': city, 'State': state, 'Zip Code': zip } = item.item;
@@ -528,7 +501,6 @@ const useDuplicateDetection = () => {
     return `${type}_${Math.abs(hash)}_${items[0].index}`;
   }, []);
 
-  // Main duplicate detection function
   const detectDuplicates = useCallback((data, keyField, threshold = 0.8) => {
     const duplicateGroups = [];
     const processed = new Set();
@@ -553,12 +525,10 @@ const useDuplicateDetection = () => {
 
         if (!compareName || !compareAddr) continue;
 
-        // First check if customer names match - required for any duplicate
         if (!validateCustomerNameMatch(currentName, compareName)) {
           continue;
         }
 
-        // Then check address similarity using validateAddressMatch
         if (validateAddressMatch(currentAddr, compareAddr, threshold)) {
           const addressSimilarity = calculateSimilarity(currentAddr, compareAddr);
           similarItems.push({
@@ -566,7 +536,7 @@ const useDuplicateDetection = () => {
             item: compareItem,
             similarity: addressSimilarity,
             details: {
-              nameSimilarity: 100, // Names already validated as matching
+              nameSimilarity: 100,
               addressSimilarity: Math.round(addressSimilarity * 100)
             }
           });
@@ -588,9 +558,10 @@ const useDuplicateDetection = () => {
 
     return duplicateGroups;
   }, [validateCustomerNameMatch, validateAddressMatch, calculateSimilarity, generateDeterministicId]);
+
+  return { detectDuplicates };
 };
 
-// Data Extraction Hook
 const useDataExtraction = () => {
   const autoSelectColumns = useCallback((headers, prefix) => {
     const customerPatterns = ['customer', 'client', 'company', 'business'];
@@ -1080,20 +1051,23 @@ const EditableDataTable = React.memo(({
   const fields = ['Customer Name', 'Address 1', 'Address 2', 'City', 'State', 'Zip Code'];
   const requiredFields = fields.filter(field => field !== 'Address 2');
 
-  // Add helper functions for empty value checking
-  const isEffectivelyEmpty = useCallback((value) => {
+  // Add helper functions for value checking
+  const isNull = useCallback((value) => {
     return value === null || 
            value === undefined || 
-           String(value).trim() === '' || 
            value === 'null' || 
            value === 'undefined';
+  }, []);
+
+  const isEmpty = useCallback((value) => {
+    return String(value || '').trim() === '';
   }, []);
 
   const isFieldEmpty = useCallback((field, value) => {
     // Don't mark Address 2 as empty since it's optional
     if (field === 'Address 2') return false;
-    return isEffectivelyEmpty(value);
-  }, [isEffectivelyEmpty]);
+    return isNull(value) || isEmpty(value);
+  }, [isNull, isEmpty]);
 
   // Calculate missing fields count
   const missingFieldsCount = useMemo(() => {
@@ -1141,7 +1115,9 @@ const EditableDataTable = React.memo(({
             {data.map((item, rowIndex) => (
               <tr
                 key={`${dataType}-${rowIndex}-${refreshKey}`}
-                className={`hover:bg-gray-50 ${item.Source === 'Commissions' ? 'bg-yellow-50' : ''}`}
+                className={`${
+                  item.Source === 'Commissions' ? 'bg-yellow-50' : ''
+                } hover:bg-gray-50`}
               >
                 <td className="px-6 py-4 whitespace-nowrap">
                   <input
@@ -1156,7 +1132,6 @@ const EditableDataTable = React.memo(({
                   const isEditing = editingCell === cellKey;
                   const value = item[field];
                   const isEmpty = isFieldEmpty(field, value);
-                  const isNull = isEffectivelyEmpty(value);
 
                   return (
                     <td
@@ -1277,8 +1252,9 @@ const WorkflowApp = () => {
   const [selectedCommissionsColumns, setSelectedCommissionsColumns] = useState([]);
 
   // Results states
-  const [extractedData, setExtractedData] = useState({ customers: [], locations: [] });
   const [duplicates, setDuplicates] = useState({ customers: [], locations: [] });
+  const [removedItems] = useState(new Set());
+  const [extractedData, setExtractedData] = useState({ customers: [], locations: [] });
   const [resolvedDuplicates, setResolvedDuplicates] = useState(new Map());
   const [duplicateThreshold, setDuplicateThreshold] = useState(0.8);
 
@@ -1310,29 +1286,20 @@ const WorkflowApp = () => {
   );
 
   // Analyze duplicates
-  const analyzeDuplicates = useCallback((customers, locations) => {
-    const customerDuplicates = detectDuplicates(customers, 'Customer Name', duplicateThreshold);
-    
-    const locationDuplicates = locations.map(loc => ({
-      ...loc,
-      _locationKey: dataService.generateLocationKey(loc)
-    }));
-    
-    const locationDupeGroups = detectDuplicates(locationDuplicates, '_locationKey', duplicateThreshold);
-    
-    const cleanedLocationDupes = locationDupeGroups.map(group => ({
-      ...group,
-      items: group.items.map(item => {
-        const { _locationKey, ...cleanItem } = item.item;
-        return { ...item, item: cleanItem };
-      })
-    }));
+  const analyzeDuplicates = useCallback(() => {
+    if (!extractedData.customers.length && !extractedData.locations.length) return;
+
+    const { customerDuplicates, locationDuplicates } = detectDuplicates(
+      extractedData.customers,
+      extractedData.locations,
+      duplicateThreshold
+    );
 
     setDuplicates({
       customers: customerDuplicates,
-      locations: cleanedLocationDupes
+      locations: locationDuplicates
     });
-  }, [detectDuplicates, duplicateThreshold]);
+  }, [extractedData, duplicateThreshold, detectDuplicates]);
 
   const handleThresholdChange = useCallback((newThreshold) => {
     setDuplicateThreshold(newThreshold);
@@ -1443,34 +1410,31 @@ const WorkflowApp = () => {
   // Get clean data for export
   const getCleanDataForExport = useCallback((dataType) => {
     const data = dataType === 'customers' ? extractedData.customers : extractedData.locations;
-    const removedItems = new Set();
-
-    resolvedDuplicates.forEach(({ removed }) => {
-      removed.forEach(item => {
-        const key = `${item.item['Customer Name']}_${item.item['Address 1']}`;
-        removedItems.add(key);
-      });
-    });
 
     return data
       .filter(item => {
-        const key = `${item['Customer Name']}_${item['Address 1']}`;
-        return !removedItems.has(key) && (item.includeInExport ?? (item.Source !== 'Commissions'));
+        const key = `${item['Customer Name'] || ''}_${item['Address 1'] || ''}`;
+        // Keep items that are either selected for export or from Orders
+        return (item.includeInExport ?? (item.Source !== 'Commissions'));
       })
+      .map(item => ({
+        'Customer Name': item['Customer Name'] || '',
+        'Address 1': item['Address 1'] || '',
+        'Address 2': item['Address 2'] || '',
+        'City': item['City'] || '',
+        'State': item['State'] || '',
+        'Zip Code': item['Zip Code'] || '',
+        'Source': item['Source'] || 'Orders',
+        'includeInExport': item.includeInExport ?? (item.Source !== 'Commissions')
+      }))
       .sort((a, b) => {
         const nameCompare = (a['Customer Name'] || '').localeCompare(b['Customer Name'] || '');
         if (nameCompare !== 0) return nameCompare;
 
-        const address1Compare = (a['Address 1'] || '').localeCompare(b['Address 1'] || '');
-        if (address1Compare !== 0) return address1Compare;
-
-        const address2Compare = (a['Address 2'] || '').localeCompare(b['Address 2'] || '');
-        if (address2Compare !== 0) return address2Compare;
-
-        return (a['City'] || '').localeCompare(b['City'] || '');
+        return (a['Address 1'] || '').localeCompare(b['Address 1'] || '');
       });
-  }, [extractedData, resolvedDuplicates]);
-
+  }, [extractedData]);
+  
   // Cell editing functions for export tables
   const handleCellClick = useCallback((dataType, rowIndex, field, currentValue) => {
     setEditingCell(`${dataType}-${rowIndex}-${field}`);
@@ -1711,14 +1675,6 @@ const WorkflowApp = () => {
       : currentData;
   }, [getCleanDataForExport, activeTab, searchTerm]);
 
-  const missingFieldsCount = useMemo(() => {
-    return filteredExportData.reduce((total, item) => {
-      return total + Object.values(item).filter(value =>
-        value === null || value === undefined || String(value).trim() === ''
-      ).length;
-    }, 0);
-  }, [filteredExportData]);
-
   return (
     <div className="max-w-7xl mx-auto p-6 bg-gray-50 min-h-screen">
       {/* Header */}
@@ -1830,7 +1786,7 @@ const WorkflowApp = () => {
               <div className="flex items-center">
                 <AlertTriangle className="h-6 w-6 text-orange-500 mr-3" />
                 <span className="text-orange-700">
-                  <strong>{totalGroups}</strong> potential duplicate groups detected
+                  <strong>{totalDuplicateGroups}</strong> potential duplicate groups detected
                 </span>
               </div>
             </div>
@@ -1888,7 +1844,6 @@ const WorkflowApp = () => {
                 <button
                   onClick={() => dataService.downloadCSV(getCleanDataForExport('customers'), 'unique_customers.csv')}
                   disabled={getCleanDataForExport('customers').length === 0}
-                 
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400"
                 >
                   <Download className="w-4 h-4" />
@@ -1908,6 +1863,7 @@ const WorkflowApp = () => {
 
           {/* Cache Stats */}
           <CacheStatsCard onClearCache={() => setRefreshKey(prev => prev + 1)} />
+
 
           {/* AI Data Cleaning Section */}
           <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -2060,17 +2016,6 @@ const WorkflowApp = () => {
 
             {/* Data Table */}
             <div className="p-6">
-              {missingFieldsCount > 0 && (
-                <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                  <div className="flex items-center">
-                    <AlertTriangle className="h-5 w-5 text-orange-500 mr-2" />
-                    <span className="text-orange-700">
-                      {missingFieldsCount} missing fields detected. Click on red cells to add missing information.
-                    </span>
-                  </div>
-                </div>
-              )}
-
               <EditableDataTable
                 data={filteredExportData}
                 dataType={activeTab}
