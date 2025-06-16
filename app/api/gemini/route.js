@@ -313,7 +313,7 @@ export async function POST(request) {
     }
 
     // Get API key from environment variables
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = "AIzaSyDbVwXzX6UrJhA4pP_YLYkOU7G15mq5bDg" //process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
         { error: 'Gemini API key not configured on server' },
@@ -332,7 +332,7 @@ export async function POST(request) {
       );
     }
 
-    const geminiService = new GeminiAPIService(apiKey);
+    const geminiService = new GeminiAPIService("apiKey");
 
     switch (operation) {
       case 'standardizeName':
@@ -475,7 +475,7 @@ export async function POST(request) {
 
 // Health check endpoint
 export async function GET() {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = "AIzaSyDbVwXzX6UrJhA4pP_YLYkOU7G15mq5bDg" //process.env.GEMINI_API_KEY;
   
   return NextResponse.json({
     status: 'healthy',
