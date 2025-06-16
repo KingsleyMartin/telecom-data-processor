@@ -8,18 +8,18 @@ const rateLimitStore = new Map();
 const checkRateLimit = (ip, limit = 100, windowMs = 60000) => {
   const now = Date.now();
   const windowStart = now - windowMs;
-  
+
   if (!rateLimitStore.has(ip)) {
     rateLimitStore.set(ip, []);
   }
-  
+
   const requests = rateLimitStore.get(ip);
   const recentRequests = requests.filter(time => time > windowStart);
-  
+
   if (recentRequests.length >= limit) {
     return false;
   }
-  
+
   recentRequests.push(now);
   rateLimitStore.set(ip, recentRequests);
   return true;
@@ -29,60 +29,52 @@ const checkRateLimit = (ip, limit = 100, windowMs = 60000) => {
 class GeminiAPIService {
   constructor(apiKey) {
     this.apiKey = apiKey;
-    this.baseURL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+    // v1beta2 text API
+    this.baseURL =
+      'https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateText';
     this.rateLimitDelay = 1000;
     this.maxRetries = 3;
   }
 
   async delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise(res => setTimeout(res, ms));
   }
 
-  async withRetry(operation, retries = this.maxRetries) {
+  async withRetry(op, retries = this.maxRetries) {
     try {
-      return await operation();
-    } catch (error) {
-      if (retries > 0 && (error.status === 429 || error.status >= 500)) {
-        const delay = Math.pow(2, this.maxRetries - retries) * 1000;
-        await this.delay(delay);
-        return this.withRetry(operation, retries - 1);
+      return await op();
+    } catch (err) {
+      if (retries > 0 && (err.status === 429 || err.status >= 500)) {
+        await this.delay((2 ** (this.maxRetries - retries)) * 1000);
+        return this.withRetry(op, retries - 1);
       }
-      throw error;
+      throw err;
     }
   }
 
-  async callGemini(prompt, systemInstruction = '') {
-    const requestBody = {
-      contents: [{
-        parts: [{
-          text: systemInstruction ? `${systemInstruction}\n\n${prompt}` : prompt
-        }]
-      }],
-      generationConfig: {
-        temperature: 0.1,
-        topK: 1,
-        topP: 1,
-        maxOutputTokens: 2048,
-      }
+  async callGemini(prompt) {
+    const body = {
+      prompt: { text: prompt },   // must be under `prompt.text`
+      temperature: 0.1,
+      candidate_count: 1,          // snake_case here
+      top_p: 1,
+      top_k: 1
     };
 
-    const response = await fetch(`${this.baseURL}?key=${this.apiKey}`, {
+    const res = await fetch(`${this.baseURL}?key=${this.apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(body)
     });
 
-    if (!response.ok) {
-      const errorData = await response.text();
-      throw new Error(`Gemini API error: ${response.status} ${response.statusText} - ${errorData}`);
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Gemini API error: ${res.status} – ${err}`);
     }
 
-    const data = await response.json();
-    if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
-      throw new Error('Invalid response from Gemini API');
-    }
-
-    return data.candidates[0].content.parts[0].text;
+    const data = await res.json();
+    // text-bison returns the text in `candidates[0].output`
+    return data.candidates?.[0]?.output;
   }
 
   async standardizeName(customerName) {
@@ -110,7 +102,7 @@ Return JSON format:
     return this.withRetry(async () => {
       await this.delay(this.rateLimitDelay);
       const response = await this.callGemini(prompt, systemInstruction);
-      
+
       try {
         const jsonMatch = response.match(/\{[\s\S]*\}/);
         if (!jsonMatch) throw new Error('No JSON found in response');
@@ -156,7 +148,7 @@ Return JSON format:
     return this.withRetry(async () => {
       await this.delay(this.rateLimitDelay);
       const response = await this.callGemini(prompt, systemInstruction);
-      
+
       try {
         const jsonMatch = response.match(/\{[\s\S]*\}/);
         if (!jsonMatch) throw new Error('No JSON found in response');
@@ -195,7 +187,7 @@ Return JSON:
     return this.withRetry(async () => {
       await this.delay(this.rateLimitDelay);
       const response = await this.callGemini(prompt, systemInstruction);
-      
+
       try {
         const jsonMatch = response.match(/\{[\s\S]*\}/);
         if (!jsonMatch) throw new Error('No JSON found in response');
@@ -217,14 +209,14 @@ Return JSON:
   async processBatch(records, operation) {
     const results = [];
     const batchSize = 5;
-    
+
     for (let i = 0; i < records.length; i += batchSize) {
       const batch = records.slice(i, i + batchSize);
       const batchPromises = batch.map(async (record, index) => {
         try {
           // Add small delay between requests in batch
           await this.delay(index * 200);
-          
+
           if (operation === 'standardizeName') {
             return await this.standardizeName(record.name);
           } else if (operation === 'standardizeAddress') {
@@ -238,11 +230,11 @@ Return JSON:
           };
         }
       });
-      
+
       const batchResults = await Promise.all(batchPromises);
       results.push(...batchResults);
     }
-    
+
     return results;
   }
 
@@ -282,7 +274,7 @@ Return JSON:
     const matrix = Array(str2.length + 1).fill().map(() => Array(str1.length + 1).fill(0));
     for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
     for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
-    
+
     for (let j = 1; j <= str2.length; j++) {
       for (let i = 1; i <= str1.length; i++) {
         const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
@@ -300,9 +292,9 @@ Return JSON:
 export async function POST(request) {
   try {
     // Get client IP for rate limiting
-    const clientIP = request.headers.get('x-forwarded-for') || 
-                     request.headers.get('x-real-ip') || 
-                     'unknown';
+    const clientIP = request.headers.get('x-forwarded-for') ||
+      request.headers.get('x-real-ip') ||
+      'unknown';
 
     // Check rate limit
     if (!checkRateLimit(clientIP)) {
@@ -313,7 +305,7 @@ export async function POST(request) {
     }
 
     // Get API key from environment variables
-    const apiKey = "AIzaSyDbVwXzX6UrJhA4pP_YLYkOU7G15mq5bDg" //process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
       return NextResponse.json(
         { error: 'Gemini API key not configured on server' },
@@ -332,7 +324,7 @@ export async function POST(request) {
       );
     }
 
-    const geminiService = new GeminiAPIService("apiKey");
+    const geminiService = new GeminiAPIService(apiKey);
 
     switch (operation) {
       case 'standardizeName':
@@ -378,7 +370,7 @@ export async function POST(request) {
             { status: 400 }
           );
         }
-        
+
         // Limit batch size for safety
         if (data.records.length > 50) {
           return NextResponse.json(
@@ -408,7 +400,7 @@ export async function POST(request) {
 
         const duplicateGroups = [];
         const processed = new Set();
-        
+
         for (let i = 0; i < data.records.length; i++) {
           if (processed.has(i)) continue;
 
@@ -445,9 +437,9 @@ export async function POST(request) {
           }
         }
 
-        return NextResponse.json({ 
-          success: true, 
-          result: { duplicateGroups } 
+        return NextResponse.json({
+          success: true,
+          result: { duplicateGroups }
         });
 
       default:
@@ -459,12 +451,12 @@ export async function POST(request) {
 
   } catch (error) {
     console.error('Gemini API route error:', error);
-    
+
     // Don't expose sensitive error details in production
     const isDev = process.env.NODE_ENV === 'development';
-    
+
     return NextResponse.json(
-      { 
+      {
         error: isDev ? error.message : 'Internal server error',
         details: isDev ? error.stack : undefined
       },
@@ -475,8 +467,8 @@ export async function POST(request) {
 
 // Health check endpoint
 export async function GET() {
-  const apiKey = "AIzaSyDbVwXzX6UrJhA4pP_YLYkOU7G15mq5bDg" //process.env.GEMINI_API_KEY;
-  
+  const apiKey = process.env.GEMINI_API_KEY
+
   return NextResponse.json({
     status: 'healthy',
     apiConfigured: !!apiKey,
