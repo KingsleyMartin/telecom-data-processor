@@ -42,10 +42,11 @@ const FileUploadStep = ({ onFileUpload }) => {
 };
 
 const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, onUpdateMapping, onSetPrimaryFile, onProcessFiles }) => {
-  const fieldTypes = ['companyName', 'address', 'city', 'state', 'zipCode'];
+  const fieldTypes = ['companyName', 'address1', 'address2', 'city', 'state', 'zipCode'];
   const fieldLabels = {
     companyName: 'Company Name',
-    address: 'Address', 
+    address1: 'Address 1', 
+    address2: 'Address 2',
     city: 'City',
     state: 'State',
     zipCode: 'Zip Code'
@@ -124,8 +125,8 @@ const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, onUpdateMa
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value="none">-- None --</option>
-                    {file.headers.map(header => (
-                      <option key={header} value={header}>
+                    {file.headers.map((header, headerIndex) => (
+                      <option key={`${fileIndex}-${headerIndex}-${header}`} value={header}>
                         {header}
                       </option>
                     ))}
@@ -445,7 +446,25 @@ const useCustomerExtractor = () => {
     const lines = content.split('\n').filter(line => line.trim());
     if (lines.length === 0) return { headers: [], data: [] };
 
-    const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+    // Handle duplicate headers by making them unique
+    const rawHeaders = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+    const headers = [];
+    const seenHeaders = new Set();
+    
+    rawHeaders.forEach((header, index) => {
+      let uniqueHeader = header;
+      let counter = 1;
+      
+      // Keep adding counter until we find a unique name
+      while (seenHeaders.has(uniqueHeader)) {
+        uniqueHeader = `${header} (${counter})`;
+        counter++;
+      }
+      
+      seenHeaders.add(uniqueHeader);
+      headers.push(uniqueHeader);
+    });
+
     const data = lines.slice(1).map(line => {
       const values = [];
       let current = '';
@@ -483,7 +502,25 @@ const useCustomerExtractor = () => {
 
       if (jsonData.length === 0) return { headers: [], data: [] };
 
-      const headers = jsonData[0].map(h => String(h || '').trim());
+      // Handle duplicate headers by making them unique
+      const rawHeaders = jsonData[0].map(h => String(h || '').trim());
+      const headers = [];
+      const seenHeaders = new Set();
+      
+      rawHeaders.forEach((header, index) => {
+        let uniqueHeader = header;
+        let counter = 1;
+        
+        // Keep adding counter until we find a unique name
+        while (seenHeaders.has(uniqueHeader)) {
+          uniqueHeader = `${header} (${counter})`;
+          counter++;
+        }
+        
+        seenHeaders.add(uniqueHeader);
+        headers.push(uniqueHeader);
+      });
+
       const data = jsonData.slice(1)
         .map(row => {
           const rowData = {};
@@ -503,25 +540,58 @@ const useCustomerExtractor = () => {
 
   const detectColumnMappings = (headers) => {
     const mapping = {};
-    const keywords = {
-      companyName: ['customer', 'company', 'business', 'organization'],
-      address: ['address', 'street', 'addr'],
-      city: ['city', 'town'],
-      state: ['state', 'province', 'region'],
-      zipCode: ['zip', 'postal', 'postcode']
+    
+    // Enhanced keyword matching with exact matches and partial matches
+    // Prioritize first occurrence of duplicate field names and avoid account-related fields
+    const fieldMatchers = {
+      companyName: (header) => {
+        const lower = header.toLowerCase();
+        return ['customer', 'company', 'business', 'organization', 'client'].some(keyword => 
+          lower.includes(keyword) && !lower.includes('id') && !lower.includes('contact') && !lower.includes('account')
+        );
+      },
+      address1: (header) => {
+        const lower = header.toLowerCase();
+        // Exact match first, then avoid account addresses and duplicates
+        return lower === 'address 1' || 
+               (lower.includes('address') && lower.includes('1') && 
+                !lower.includes('account') && !lower.includes('('));
+      },
+      address2: (header) => {
+        const lower = header.toLowerCase();
+        // Handle the space-prefixed version and avoid account addresses and duplicates
+        return lower === 'address 2' || lower === ' address 2' || 
+               (lower.includes('address') && lower.includes('2') && 
+                !lower.includes('account') && !lower.includes('('));
+      },
+      city: (header) => {
+        const lower = header.toLowerCase();
+        // Exact match first, avoid "Account City", "City, State" combinations, and duplicates
+        return lower === 'city' || 
+               (lower.includes('city') && !lower.includes('account') && 
+                !lower.includes(',') && !lower.includes('('));
+      },
+      state: (header) => {
+        const lower = header.toLowerCase();
+        // Exact match first, avoid "Account State", "City, State" combinations, and duplicates
+        return lower === 'state' || 
+               (lower.includes('state') && !lower.includes('account') && 
+                !lower.includes(',') && !lower.includes('('));
+      },
+      zipCode: (header) => {
+        const lower = header.toLowerCase();
+        // Exact matches first, avoid "Account Postal Code" and duplicates
+        return lower === 'postal code' || lower === 'zip code' || lower === 'zipcode' || lower === 'zip' ||
+               (lower.includes('postal') && !lower.includes('account') && !lower.includes('('));
+      }
     };
 
-    headers.forEach(header => {
-      const lowerHeader = header.toLowerCase();
-      Object.entries(keywords).forEach(([fieldType, keywordList]) => {
-        if (!mapping[fieldType]) {
-          for (const keyword of keywordList) {
-            if (lowerHeader.includes(keyword)) {
-              if (fieldType === 'address' && lowerHeader.includes('2')) continue;
-              mapping[fieldType] = header;
-              break;
-            }
-          }
+    // Process headers in order to ensure we get first occurrences
+    headers.forEach((header, index) => {
+      Object.entries(fieldMatchers).forEach(([fieldType, matcher]) => {
+        if (!mapping[fieldType] && matcher(header)) {
+          mapping[fieldType] = header;
+          console.log(`Auto-mapped ${fieldType} to "${header}" at position ${index}`);
         }
       });
     });
@@ -660,21 +730,34 @@ const useCustomerExtractor = () => {
         const mapping = columnMappings[fileIndex];
 
         for (const row of file.data) {
+          // Skip rows without company name
           if (!mapping.companyName || !row[mapping.companyName]) continue;
 
           const companyName = row[mapping.companyName];
-          const address = mapping.address ? row[mapping.address] || '' : '';
+          const address1 = mapping.address1 ? row[mapping.address1] || '' : '';
+          const address2 = mapping.address2 ? row[mapping.address2] || '' : '';
           const city = mapping.city ? row[mapping.city] || '' : '';
           const state = mapping.state ? row[mapping.state] || '' : '';
           const zipCode = mapping.zipCode ? row[mapping.zipCode] || '' : '';
 
-          const fullAddressParts = [address, city, state, zipCode].filter(Boolean);
+          // Skip rows without any address information
+          // At least one of: address1, city, state, or zipCode must have meaningful data
+          const hasAddressInfo = [address1, city, state, zipCode].some(field => 
+            field && field.trim().length > 0
+          );
+          
+          if (!hasAddressInfo) {
+            console.log(`Skipping row for company "${companyName}" - no address information found`);
+            continue;
+          }
+
+          const fullAddressParts = [address1, address2, city, state, zipCode].filter(Boolean);
           const fullAddress = fullAddressParts.join(', ');
 
           allRecords.push({
             companyName: companyName.trim(),
-            address1: address.trim(),
-            address2: '',
+            address1: address1.trim(),
+            address2: address2.trim(),
             city: city.trim(),
             state: state.trim(),
             zipCode: zipCode.trim(),
@@ -707,8 +790,8 @@ const useCustomerExtractor = () => {
           
           if (aIsPrimary !== bIsPrimary) return bIsPrimary - aIsPrimary;
           
-          const aCompleteness = [a.address1, a.city, a.state, a.zipCode].filter(Boolean).length;
-          const bCompleteness = [b.address1, b.city, b.state, b.zipCode].filter(Boolean).length;
+          const aCompleteness = [a.address1, a.address2, a.city, a.state, a.zipCode].filter(Boolean).length;
+          const bCompleteness = [b.address1, b.address2, b.city, b.state, b.zipCode].filter(Boolean).length;
           return bCompleteness - aCompleteness;
         });
 

@@ -25,10 +25,12 @@ export async function POST(request) {
 
     // Construct the prompt
     const prompt = `Rules:
-    1. Break the single-line address into separate fields: "Address 1", "Address 2", "City", "State", and "Zip Code".
-    2. Convert all fields to proper title case (first letter of each word capitalized), except for the State which should be a 2-letter uppercase code.
-    3. Standardize street suffixes (St -> Street, Ave -> Avenue, Rd -> Road, Dr -> Drive, Blvd -> Boulevard, Ln -> Lane, Ct -> Court).
-    4. Identify and place any suite, unit, apartment, building, or floor information into the "Address 2" field.
+    1. Detect if a field contains multiple address elements
+    -- If the field contains the entire address including street: Break the single-line address into separate fields: "Address 1", "Address 2", "City", "State", and "Zip Code".
+    -- If the field contains city, state, and zip code: Break it into "City", "State", and "Zip Code".
+    2. Identify and place any suite, unit, apartment, building, or floor information into the "Address 2" field. Remove information in Address 2 if it is the same as Address 1.
+    3. Convert all fields to proper title case (first letter of each word capitalized), except for the State which should be a 2-letter uppercase code.
+    4. Standardize street suffixes (St -> Street, Ave -> Avenue, Rd -> Road, Dr -> Drive, Blvd -> Boulevard, Ln -> Lane, Ct -> Court).
     5. Clean and format city names properly.
     6. Keep the zip code as-is but remove any invalid characters (except for dashes).
     Return format (valid JSON only): {
