@@ -41,7 +41,7 @@ const FileUploadStep = ({ onFileUpload }) => {
   );
 };
 
-const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, onUpdateMapping, onSetPrimaryFile, onProcessFiles }) => {
+const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, mappingName, onUpdateMapping, onSetPrimaryFile, onProcessFiles, onSetMappingName, onExportMapping, onImportMapping }) => {
   const fieldTypes = ['companyName', 'address1', 'address2', 'city', 'state', 'zipCode'];
   const fieldLabels = {
     companyName: 'Company Name',
@@ -65,6 +65,72 @@ const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, onUpdateMa
         >
           Process Files
         </button>
+      </div>
+
+      {/* Mapping Save/Load Section */}
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+        <h3 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
+          <Download className="text-green-600" size={16} />
+          Save & Load Field Mappings
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Save Mapping */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Save Current Mapping
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={mappingName}
+                onChange={(e) => onSetMappingName(e.target.value)}
+                placeholder="Enter mapping name..."
+                className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <button
+                onClick={onExportMapping}
+                disabled={!mappingName.trim()}
+                className={`px-4 py-2 rounded-md border flex items-center gap-2 ${
+                  !mappingName.trim()
+                    ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
+                    : 'bg-green-600 text-white border-green-600 hover:bg-green-700'
+                }`}
+              >
+                <Download size={16} />
+                Save
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Downloads a JSON file with your current field mappings
+            </p>
+          </div>
+
+          {/* Load Mapping */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Load Saved Mapping
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="file"
+                accept=".json"
+                onChange={onImportMapping}
+                className="hidden"
+                id="mapping-upload"
+              />
+              <label
+                htmlFor="mapping-upload"
+                className="flex-1 cursor-pointer inline-flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+              >
+                <Upload size={16} className="mr-2" />
+                Choose Mapping File
+              </label>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Upload a previously saved mapping JSON file
+            </p>
+          </div>
+        </div>
       </div>
 
       {files.length > 1 && (
@@ -141,7 +207,64 @@ const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, onUpdateMa
   );
 };
 
-const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCount, showMissingAddresses, showDuplicates, editingCell, isStandardizing, files, primaryFileIndex, onToggleRecordSelection, onToggleSelectAll, onCellEdit, onCellClick, onCellBlur, onToggleMissingAddresses, onToggleDuplicates, onStandardizeSelected, onStandardizeAll, onExport, onReset }) => {
+const OriginalDataModal = ({ isOpen, record, onClose }) => {
+  if (!isOpen || !record || !record.originalData) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold text-gray-800">Original Data vs Standardized</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-700 text-2xl"
+          >
+            ×
+          </button>
+        </div>
+        
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <h3 className="font-medium text-gray-700 mb-3 text-center">Original Data</h3>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-2">
+                <div><strong>Company Name:</strong> {record.originalData.companyName}</div>
+                <div><strong>Address 1:</strong> {record.originalData.address1}</div>
+                <div><strong>Address 2:</strong> {record.originalData.address2}</div>
+                <div><strong>City:</strong> {record.originalData.city}</div>
+                <div><strong>State:</strong> {record.originalData.state}</div>
+                <div><strong>Zip Code:</strong> {record.originalData.zipCode}</div>
+              </div>
+            </div>
+            
+            <div>
+              <h3 className="font-medium text-gray-700 mb-3 text-center">Standardized Data</h3>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-2">
+                <div><strong>Company Name:</strong> {record.companyName}</div>
+                <div><strong>Address 1:</strong> {record.address1}</div>
+                <div><strong>Address 2:</strong> {record.address2}</div>
+                <div><strong>City:</strong> {record.city}</div>
+                <div><strong>State:</strong> {record.state}</div>
+                <div><strong>Zip Code:</strong> {record.zipCode}</div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="flex justify-end pt-4">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCount, showMissingAddresses, showDuplicates, editingCell, isStandardizing, files, primaryFileIndex, onToggleRecordSelection, onToggleSelectAll, onCellEdit, onCellClick, onCellBlur, onToggleMissingAddresses, onToggleDuplicates, onStandardizeSelected, onStandardizeAll, onExport, onReset, onViewOriginalData }) => {
   const allVisibleSelected = filteredData.length > 0 && 
     filteredData.every(record => selectedRecords.has(processedData.indexOf(record)));
 
@@ -286,7 +409,14 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
                     {renderEditableCell(record, 'companyName', originalIndex)}
                     {record.isStandardized && (
                       <div className="absolute top-1 right-1">
-                        <div className="w-2 h-2 bg-green-500 rounded-full" title="Standardized by Gemini API"></div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onViewOriginalData(record);
+                          }}
+                          className="w-2 h-2 bg-green-500 rounded-full hover:bg-green-600 cursor-pointer transition-colors"
+                          title="Click to view original data before standardization"
+                        />
                       </div>
                     )}
                   </td>
@@ -346,8 +476,8 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
             Standardized records
           </div>
           <div className="flex items-center">
-            <div className="w-2 h-2 bg-green-500 rounded-full mr-2" />
-            API processed
+            <div className="w-2 h-2 bg-green-500 rounded-full mr-2 cursor-pointer" />
+            Click to view original data
           </div>
           <div className="flex items-center">
             <div className="w-4 h-4 bg-green-100 border border-green-300 mr-2 rounded text-xs flex items-center justify-center">
@@ -440,6 +570,9 @@ const useCustomerExtractor = () => {
   const [step, setStep] = useState(STEPS.UPLOAD);
   const [isStandardizing, setIsStandardizing] = useState(false);
   const [standardizationProgress, setStandardizationProgress] = useState({ current: 0, total: 0 });
+  const [mappingName, setMappingName] = useState('');
+  const [showOriginalModal, setShowOriginalModal] = useState(false);
+  const [selectedOriginalRecord, setSelectedOriginalRecord] = useState(null);
 
   // Data processing utilities
   const parseCSV = (content) => {
@@ -635,6 +768,83 @@ const useCustomerExtractor = () => {
       };
     }
   };
+
+  // Mapping save/load functions
+  const exportMapping = useCallback(() => {
+    if (!mappingName.trim()) {
+      alert('Please enter a name for the mapping.');
+      return;
+    }
+
+    try {
+      const mappingData = {
+        name: mappingName.trim(),
+        timestamp: new Date().toISOString(),
+        files: files.map(file => ({
+          name: file.name,
+          headers: file.headers
+        })),
+        columnMappings: columnMappings,
+        primaryFileIndex: primaryFileIndex,
+        version: '1.0'
+      };
+
+      const dataStr = JSON.stringify(mappingData, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${mappingName.trim().replace(/[^a-z0-9]/gi, '_').toLowerCase()}_mapping.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      alert(`Mapping "${mappingName}" has been saved successfully!`);
+    } catch (error) {
+      console.error('Error exporting mapping:', error);
+      alert('An error occurred while saving the mapping. Please try again.');
+    }
+  }, [mappingName, files, columnMappings, primaryFileIndex]);
+
+  const importMapping = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const fileContent = await file.text();
+      const mappingData = JSON.parse(fileContent);
+
+      // Validate mapping structure
+      if (!mappingData.name || !mappingData.columnMappings) {
+        throw new Error('Invalid mapping file format');
+      }
+
+      // Check if current files match the mapping
+      if (!files || files.length === 0) {
+        alert('Please upload files first before importing a mapping.');
+        return;
+      }
+
+      // Apply the mapping
+      setMappingName(mappingData.name);
+      setColumnMappings(mappingData.columnMappings);
+      
+      if (mappingData.primaryFileIndex !== undefined && mappingData.primaryFileIndex < files.length) {
+        setPrimaryFileIndex(mappingData.primaryFileIndex);
+      }
+
+      alert(`Mapping "${mappingData.name}" has been loaded successfully!`);
+      
+    } catch (error) {
+      console.error('Error importing mapping:', error);
+      alert('Error loading mapping file. Please check that it is a valid mapping file.');
+    }
+
+    // Reset the file input
+    event.target.value = '';
+  }, [files]);
 
   // Memoized computed values
   const filteredData = useMemo(() => {
@@ -885,7 +1095,19 @@ const useCustomerExtractor = () => {
               address1: '', address2: '', city: '', state: '', zipCode: ''
             };
 
-        updatedData[recordIndex] = { ...record, ...standardized, isStandardized: true };
+        updatedData[recordIndex] = { 
+          ...record, 
+          ...standardized, 
+          isStandardized: true,
+          originalData: {
+            companyName: record.companyName,
+            address1: record.address1,
+            address2: record.address2,
+            city: record.city,
+            state: record.state,
+            zipCode: record.zipCode
+          }
+        };
       }
 
       setProcessedData(updatedData);
@@ -972,6 +1194,16 @@ const useCustomerExtractor = () => {
     setEditingCell(null);
   }, []);
 
+  const viewOriginalData = useCallback((record) => {
+    setSelectedOriginalRecord(record);
+    setShowOriginalModal(true);
+  }, []);
+
+  const closeOriginalModal = useCallback(() => {
+    setShowOriginalModal(false);
+    setSelectedOriginalRecord(null);
+  }, []);
+
   const exportToCSV = useCallback(() => {
     try {
       const selectedData = processedData.filter((record, index) => selectedRecords.has(index));
@@ -1056,15 +1288,21 @@ const useCustomerExtractor = () => {
     setShowDuplicates(true);
     setIsStandardizing(false);
     setStandardizationProgress({ current: 0, total: 0 });
+    setMappingName('');
+    setShowOriginalModal(false);
+    setSelectedOriginalRecord(null);
   }, []);
 
   return {
     files, processedData, columnMappings, primaryFileIndex, showMissingAddresses, showDuplicates,
-    selectedRecords, editingCell, step, isStandardizing, standardizationProgress,
-    setShowMissingAddresses, setShowDuplicates, setPrimaryFileIndex,
+    selectedRecords, editingCell, step, isStandardizing, standardizationProgress, mappingName,
+    showOriginalModal, selectedOriginalRecord,
+    setShowMissingAddresses, setShowDuplicates, setPrimaryFileIndex, setMappingName,
     handleFileUpload, updateColumnMapping, processFiles, standardizeSelectedRecords, 
     standardizeAllRecords, toggleRecordSelection, toggleSelectAll, handleCellEdit, 
-    handleCellClick, handleCellBlur, exportToCSV, resetAll, filteredData, selectedCount
+    handleCellClick, handleCellBlur, exportToCSV, resetAll, exportMapping, importMapping,
+    viewOriginalData, closeOriginalModal,
+    filteredData, selectedCount
   };
 };
 
@@ -1082,6 +1320,9 @@ const CustomerExtractor = () => {
     step,
     isStandardizing,
     standardizationProgress,
+    mappingName,
+    showOriginalModal,
+    selectedOriginalRecord,
     
     // Actions
     handleFileUpload,
@@ -1089,6 +1330,7 @@ const CustomerExtractor = () => {
     setPrimaryFileIndex,
     setShowMissingAddresses,
     setShowDuplicates,
+    setMappingName,
     toggleRecordSelection,
     toggleSelectAll,
     handleCellEdit,
@@ -1099,6 +1341,10 @@ const CustomerExtractor = () => {
     standardizeAllRecords,
     exportToCSV,
     resetAll,
+    exportMapping,
+    importMapping,
+    viewOriginalData,
+    closeOriginalModal,
     
     // Computed
     filteredData,
@@ -1133,9 +1379,13 @@ const CustomerExtractor = () => {
             files={files}
             columnMappings={columnMappings}
             primaryFileIndex={primaryFileIndex}
+            mappingName={mappingName}
             onUpdateMapping={updateColumnMapping}
             onSetPrimaryFile={setPrimaryFileIndex}
             onProcessFiles={processFiles}
+            onSetMappingName={setMappingName}
+            onExportMapping={exportMapping}
+            onImportMapping={importMapping}
           />
         )}
 
@@ -1162,9 +1412,16 @@ const CustomerExtractor = () => {
             onStandardizeAll={standardizeAllRecords}
             onExport={exportToCSV}
             onReset={resetAll}
+            onViewOriginalData={viewOriginalData}
           />
         )}
       </div>
+
+      <OriginalDataModal
+        isOpen={showOriginalModal}
+        record={selectedOriginalRecord}
+        onClose={closeOriginalModal}
+      />
     </div>
   );
 };
