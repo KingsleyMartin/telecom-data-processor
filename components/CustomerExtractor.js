@@ -6,7 +6,7 @@ import { FileText, Upload, Download, Settings, Eye, EyeOff, Edit3 } from 'lucide
 import * as XLSX from 'xlsx';
 
 // Constants
-const STEPS = { UPLOAD: 1, MAPPING: 2, RESULTS: 3 };
+const STEPS = { UPLOAD: 1, WORKSHEET_SELECTION: 1.5, MAPPING: 2, RESULTS: 3 };
 
 // Components
 const FileUploadStep = ({ onFileUpload }) => {
@@ -36,6 +36,73 @@ const FileUploadStep = ({ onFileUpload }) => {
         >
           Choose Files
         </label>
+      </div>
+    </div>
+  );
+};
+
+const WorksheetSelectionStep = ({ filesWithWorksheets, onWorksheetSelection, onContinue }) => {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+          <FileText className="text-blue-600" />
+          Select Worksheets
+        </h2>
+        <button
+          onClick={onContinue}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+        >
+          Continue to Mapping
+        </button>
+      </div>
+
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <p className="text-sm text-blue-700">
+          <strong>Multiple worksheets detected:</strong> Please select the correct worksheet for each Excel file below.
+        </p>
+      </div>
+
+      <div className="space-y-4">
+        {filesWithWorksheets.map((file, fileIndex) => (
+          <div key={fileIndex} className="border rounded-lg p-4">
+            <h3 className="font-medium text-gray-800 mb-4">{file.name}</h3>
+            
+            <div className="space-y-3">
+              {file.worksheets.map((worksheet, worksheetIndex) => (
+                <label key={worksheetIndex} className="flex items-start gap-3 cursor-pointer p-3 border rounded-md hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    name={`worksheet-${fileIndex}`}
+                    value={worksheetIndex}
+                    checked={file.selectedWorksheetIndex === worksheetIndex}
+                    onChange={(e) => onWorksheetSelection(fileIndex, parseInt(e.target.value))}
+                    className="mt-1"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-gray-800">{worksheet.name}</span>
+                      {file.recommendedWorksheetIndex === worksheetIndex && (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                          Recommended
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-sm text-gray-600 mt-1">
+                      {worksheet.rowCount} rows, {worksheet.columnCount} columns
+                    </div>
+                    {worksheet.sampleHeaders.length > 0 && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        Headers: {worksheet.sampleHeaders.slice(0, 5).join(', ')}
+                        {worksheet.sampleHeaders.length > 5 && '...'}
+                      </div>
+                    )}
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -505,25 +572,30 @@ const StepIndicator = ({ currentStep }) => {
   const steps = [1, 2, 3];
   const stepLabels = {
     1: 'Upload Files',
+    1.5: 'Select Worksheets',
     2: 'Map Columns',
     3: 'Review Results'
   };
 
+  // Convert decimal step to display step
+  const displaySteps = currentStep === 1.5 ? [1, 1.5, 2, 3] : [1, 2, 3];
+  const currentDisplayStep = currentStep;
+
   return (
     <div className="mb-8">
       <div className="flex items-center justify-between">
-        {steps.map((stepNumber, index) => (
-          <div key={stepNumber} className={`flex items-center ${index < steps.length - 1 ? 'flex-1' : ''}`}>
+        {displaySteps.map((stepNumber, index) => (
+          <div key={stepNumber} className={`flex items-center ${index < displaySteps.length - 1 ? 'flex-1' : ''}`}>
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-              currentStep >= stepNumber ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-600'
+              currentDisplayStep >= stepNumber ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-600'
             }`}>
-              {stepNumber}
+              {stepNumber === 1.5 ? '📊' : Math.floor(stepNumber)}
             </div>
-            <span className={`ml-2 text-sm ${currentStep >= stepNumber ? 'text-blue-600' : 'text-gray-500'}`}>
+            <span className={`ml-2 text-sm ${currentDisplayStep >= stepNumber ? 'text-blue-600' : 'text-gray-500'}`}>
               {stepLabels[stepNumber]}
             </span>
-            {index < steps.length - 1 && (
-              <div className={`flex-1 h-0.5 mx-4 ${currentStep > stepNumber ? 'bg-blue-600' : 'bg-gray-300'}`} />
+            {index < displaySteps.length - 1 && (
+              <div className={`flex-1 h-0.5 mx-4 ${currentDisplayStep > stepNumber ? 'bg-blue-600' : 'bg-gray-300'}`} />
             )}
           </div>
         ))}
@@ -560,6 +632,7 @@ const ProgressIndicator = ({ current, total }) => {
 
 const useCustomerExtractor = () => {
   const [files, setFiles] = useState([]);
+  const [filesWithWorksheets, setFilesWithWorksheets] = useState([]);
   const [processedData, setProcessedData] = useState([]);
   const [columnMappings, setColumnMappings] = useState({});
   const [primaryFileIndex, setPrimaryFileIndex] = useState(0);
@@ -629,8 +702,119 @@ const useCustomerExtractor = () => {
   const parseExcel = (fileBuffer) => {
     try {
       const workbook = XLSX.read(fileBuffer, { type: 'array' });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
+      
+      if (workbook.SheetNames.length === 1) {
+        // Single worksheet - process normally
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        if (jsonData.length === 0) return { headers: [], data: [] };
+
+        // Handle duplicate headers by making them unique
+        const rawHeaders = jsonData[0].map(h => String(h || '').trim());
+        const headers = [];
+        const seenHeaders = new Set();
+        
+        rawHeaders.forEach((header, index) => {
+          let uniqueHeader = header;
+          let counter = 1;
+          
+          // Keep adding counter until we find a unique name
+          while (seenHeaders.has(uniqueHeader)) {
+            uniqueHeader = `${header} (${counter})`;
+            counter++;
+          }
+          
+          seenHeaders.add(uniqueHeader);
+          headers.push(uniqueHeader);
+        });
+
+        const data = jsonData.slice(1)
+          .map(row => {
+            const rowData = {};
+            headers.forEach((header, index) => {
+              rowData[header] = String(row[index] || '').trim();
+            });
+            return rowData;
+          })
+          .filter(row => Object.values(row).some(val => val));
+
+        return { headers, data };
+      } else {
+        // Multiple worksheets - return worksheet info for selection
+        const worksheets = workbook.SheetNames.map(sheetName => {
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          
+          if (jsonData.length === 0) {
+            return {
+              name: sheetName,
+              rowCount: 0,
+              columnCount: 0,
+              sampleHeaders: [],
+              score: 0
+            };
+          }
+
+          const headers = jsonData[0] ? jsonData[0].map(h => String(h || '').trim()).filter(Boolean) : [];
+          const dataRows = jsonData.slice(1).filter(row => row.some(cell => cell !== undefined && cell !== ''));
+          
+          // Calculate relevance score based on headers and data
+          let score = 0;
+          
+          // Score for relevant keywords in headers
+          const relevantKeywords = ['company', 'customer', 'business', 'organization', 'client', 'address', 'city', 'state', 'zip'];
+          headers.forEach(header => {
+            const lowerHeader = header.toLowerCase();
+            relevantKeywords.forEach(keyword => {
+              if (lowerHeader.includes(keyword)) {
+                score += 10;
+              }
+            });
+          });
+          
+          // Score for data density
+          score += Math.min(dataRows.length, 100); // Up to 100 points for row count
+          score += Math.min(headers.length, 20); // Up to 20 points for column count
+          
+          // Bonus for having both company and address-related headers
+          const hasCompany = headers.some(h => ['company', 'customer', 'business', 'organization', 'client'].some(k => h.toLowerCase().includes(k)));
+          const hasAddress = headers.some(h => ['address', 'city', 'state', 'zip'].some(k => h.toLowerCase().includes(k)));
+          if (hasCompany && hasAddress) {
+            score += 50;
+          }
+          
+          return {
+            name: sheetName,
+            rowCount: dataRows.length,
+            columnCount: headers.length,
+            sampleHeaders: headers.slice(0, 10),
+            score: score
+          };
+        });
+
+        // Find the worksheet with the highest score
+        const recommendedIndex = worksheets.reduce((bestIndex, worksheet, index) => {
+          return worksheets[bestIndex].score < worksheet.score ? index : bestIndex;
+        }, 0);
+
+        return {
+          isMultiWorksheet: true,
+          worksheets: worksheets,
+          recommendedWorksheetIndex: recommendedIndex
+        };
+      }
+    } catch (error) {
+      console.error('Error parsing Excel file:', error);
+      return { headers: [], data: [] };
+    }
+  };
+
+  const parseExcelWorksheet = (fileBuffer, worksheetIndex) => {
+    try {
+      const workbook = XLSX.read(fileBuffer, { type: 'array' });
+      const sheetName = workbook.SheetNames[worksheetIndex];
+      const worksheet = workbook.Sheets[sheetName];
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
       if (jsonData.length === 0) return { headers: [], data: [] };
@@ -666,7 +850,7 @@ const useCustomerExtractor = () => {
 
       return { headers, data };
     } catch (error) {
-      console.error('Error parsing Excel file:', error);
+      console.error('Error parsing Excel worksheet:', error);
       return { headers: [], data: [] };
     }
   };
@@ -871,6 +1055,7 @@ const useCustomerExtractor = () => {
     try {
       const uploadedFiles = Array.from(event.target.files);
       const fileData = [];
+      const filesNeedingWorksheetSelection = [];
 
       for (const file of uploadedFiles) {
         let parsed;
@@ -879,44 +1064,112 @@ const useCustomerExtractor = () => {
         if (fileName.endsWith('.csv')) {
           const content = await file.text();
           parsed = parseCSV(content);
+          
+          if (parsed.headers.length > 0 && parsed.data.length > 0) {
+            fileData.push({
+              name: file.name,
+              headers: parsed.headers,
+              data: parsed.data
+            });
+          }
         } else if (fileName.match(/\.(xlsx|xls)$/)) {
           const buffer = await file.arrayBuffer();
           parsed = parseExcel(buffer);
+          
+          if (parsed.isMultiWorksheet) {
+            // Store file buffer for later processing
+            filesNeedingWorksheetSelection.push({
+              name: file.name,
+              buffer: buffer,
+              worksheets: parsed.worksheets,
+              recommendedWorksheetIndex: parsed.recommendedWorksheetIndex,
+              selectedWorksheetIndex: parsed.recommendedWorksheetIndex
+            });
+          } else if (parsed.headers.length > 0 && parsed.data.length > 0) {
+            fileData.push({
+              name: file.name,
+              headers: parsed.headers,
+              data: parsed.data
+            });
+          }
         } else {
           console.warn(`Unsupported file type: ${file.name}`);
           continue;
         }
+      }
 
+      if (fileData.length === 0 && filesNeedingWorksheetSelection.length === 0) {
+        alert('No valid files were processed. Please check your file formats.');
+        return;
+      }
+
+      if (filesNeedingWorksheetSelection.length > 0) {
+        // Need worksheet selection step
+        setFilesWithWorksheets(filesNeedingWorksheetSelection);
+        setFiles(fileData); // Store already processed files
+        setStep(STEPS.WORKSHEET_SELECTION);
+      } else {
+        // All files processed, go to mapping
+        setFiles(fileData);
+        
+        const initialMappings = {};
+        fileData.forEach((file, index) => {
+          initialMappings[index] = detectColumnMappings(file.headers);
+        });
+        setColumnMappings(initialMappings);
+
+        const orderFileIndex = fileData.findIndex(file => file.name.toLowerCase().includes('order'));
+        setPrimaryFileIndex(orderFileIndex >= 0 ? orderFileIndex : 0);
+        setStep(STEPS.MAPPING);
+      }
+    } catch (error) {
+      console.error('Error uploading files:', error);
+      alert('An error occurred while processing the files. Please try again.');
+    }
+  }, []);
+
+  const handleWorksheetSelection = useCallback((fileIndex, worksheetIndex) => {
+    setFilesWithWorksheets(prev => {
+      const updated = [...prev];
+      updated[fileIndex].selectedWorksheetIndex = worksheetIndex;
+      return updated;
+    });
+  }, []);
+
+  const handleContinueFromWorksheetSelection = useCallback(async () => {
+    try {
+      const processedWorksheetFiles = [];
+      
+      for (const fileWithWorksheets of filesWithWorksheets) {
+        const parsed = parseExcelWorksheet(fileWithWorksheets.buffer, fileWithWorksheets.selectedWorksheetIndex);
+        
         if (parsed.headers.length > 0 && parsed.data.length > 0) {
-          fileData.push({
-            name: file.name,
+          processedWorksheetFiles.push({
+            name: fileWithWorksheets.name,
             headers: parsed.headers,
             data: parsed.data
           });
         }
       }
 
-      if (fileData.length === 0) {
-        alert('No valid files were processed. Please check your file formats.');
-        return;
-      }
-
-      setFiles(fileData);
+      // Combine with already processed files
+      const allFiles = [...files, ...processedWorksheetFiles];
+      setFiles(allFiles);
 
       const initialMappings = {};
-      fileData.forEach((file, index) => {
+      allFiles.forEach((file, index) => {
         initialMappings[index] = detectColumnMappings(file.headers);
       });
       setColumnMappings(initialMappings);
 
-      const orderFileIndex = fileData.findIndex(file => file.name.toLowerCase().includes('order'));
+      const orderFileIndex = allFiles.findIndex(file => file.name.toLowerCase().includes('order'));
       setPrimaryFileIndex(orderFileIndex >= 0 ? orderFileIndex : 0);
       setStep(STEPS.MAPPING);
     } catch (error) {
-      console.error('Error uploading files:', error);
-      alert('An error occurred while processing the files. Please try again.');
+      console.error('Error processing worksheet selections:', error);
+      alert('An error occurred while processing the worksheet selections. Please try again.');
     }
-  }, []);
+  }, [files, filesWithWorksheets]);
 
   const updateColumnMapping = useCallback((fileIndex, field, column) => {
     setColumnMappings(prev => ({
@@ -1279,6 +1532,7 @@ const useCustomerExtractor = () => {
   const resetAll = useCallback(() => {
     setStep(STEPS.UPLOAD);
     setFiles([]);
+    setFilesWithWorksheets([]);
     setProcessedData([]);
     setColumnMappings({});
     setSelectedRecords(new Set());
@@ -1294,11 +1548,11 @@ const useCustomerExtractor = () => {
   }, []);
 
   return {
-    files, processedData, columnMappings, primaryFileIndex, showMissingAddresses, showDuplicates,
+    files, filesWithWorksheets, processedData, columnMappings, primaryFileIndex, showMissingAddresses, showDuplicates,
     selectedRecords, editingCell, step, isStandardizing, standardizationProgress, mappingName,
     showOriginalModal, selectedOriginalRecord,
     setShowMissingAddresses, setShowDuplicates, setPrimaryFileIndex, setMappingName,
-    handleFileUpload, updateColumnMapping, processFiles, standardizeSelectedRecords, 
+    handleFileUpload, handleWorksheetSelection, handleContinueFromWorksheetSelection, updateColumnMapping, processFiles, standardizeSelectedRecords, 
     standardizeAllRecords, toggleRecordSelection, toggleSelectAll, handleCellEdit, 
     handleCellClick, handleCellBlur, exportToCSV, resetAll, exportMapping, importMapping,
     viewOriginalData, closeOriginalModal,
@@ -1310,6 +1564,7 @@ const CustomerExtractor = () => {
   const {
     // State
     files,
+    filesWithWorksheets,
     processedData,
     columnMappings,
     primaryFileIndex,
@@ -1326,6 +1581,8 @@ const CustomerExtractor = () => {
     
     // Actions
     handleFileUpload,
+    handleWorksheetSelection,
+    handleContinueFromWorksheetSelection,
     updateColumnMapping,
     setPrimaryFileIndex,
     setShowMissingAddresses,
@@ -1372,6 +1629,14 @@ const CustomerExtractor = () => {
 
         {step === STEPS.UPLOAD && (
           <FileUploadStep onFileUpload={handleFileUpload} />
+        )}
+
+        {step === STEPS.WORKSHEET_SELECTION && (
+          <WorksheetSelectionStep
+            filesWithWorksheets={filesWithWorksheets}
+            onWorksheetSelection={handleWorksheetSelection}
+            onContinue={handleContinueFromWorksheetSelection}
+          />
         )}
 
         {step === STEPS.MAPPING && (
