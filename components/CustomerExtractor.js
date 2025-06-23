@@ -1,14 +1,116 @@
 "use client";
 
-import React from 'react';
 import { useState, useCallback, useMemo } from 'react';
-import { FileText, Upload, Download, Settings, Eye, EyeOff, Edit3 } from 'lucide-react';
+import { FileText, Upload, Download, Settings, Eye, EyeOff, Edit3, X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 // Constants
 const STEPS = { UPLOAD: 1, WORKSHEET_SELECTION: 1.5, MAPPING: 2, RESULTS: 3 };
 
-// Components
+// Snackbar Component
+const Snackbar = ({ notification, onClose }) => {
+  const getIcon = () => {
+    switch (notification.type) {
+      case 'success': return <CheckCircle className="w-5 h-5" />;
+      case 'error': return <AlertCircle className="w-5 h-5" />;
+      case 'warning': return <AlertTriangle className="w-5 h-5" />;
+      default: return <Info className="w-5 h-5" />;
+    }
+  };
+
+  const getStyles = () => {
+    switch (notification.type) {
+      case 'success': return 'bg-green-50 border-green-200 text-green-800';
+      case 'error': return 'bg-red-50 border-red-200 text-red-800';
+      case 'warning': return 'bg-yellow-50 border-yellow-200 text-yellow-800';
+      default: return 'bg-blue-50 border-blue-200 text-blue-800';
+    }
+  };
+
+  return (
+    <div className={`flex items-center gap-3 p-4 border rounded-lg shadow-lg ${getStyles()} animate-in slide-in-from-right duration-300`}>
+      {getIcon()}
+      <div className="flex-1">
+        {notification.title && (
+          <div className="font-medium">{notification.title}</div>
+        )}
+        <div className={notification.title ? 'text-sm' : ''}>{notification.message}</div>
+      </div>
+      <button
+        onClick={onClose}
+        className="p-1 hover:bg-black hover:bg-opacity-10 rounded"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+};
+
+// Snackbar Container
+const SnackbarContainer = ({ notifications, onRemove }) => {
+  return (
+    <div className="fixed top-4 right-4 z-50 space-y-2 max-w-md">
+      {notifications.map((notification) => (
+        <Snackbar
+          key={notification.id}
+          notification={notification}
+          onClose={() => onRemove(notification.id)}
+        />
+      ))}
+    </div>
+  );
+};
+
+// Custom hook for snackbar notifications
+const useSnackbar = () => {
+  const [notifications, setNotifications] = useState([]);
+
+  const addNotification = useCallback((notification) => {
+    const id = Date.now() + Math.random();
+    const newNotification = { id, ...notification };
+    
+    setNotifications(prev => [...prev, newNotification]);
+
+    // Auto-remove after duration (default 5 seconds)
+    const duration = notification.duration || 5000;
+    if (duration > 0) {
+      setTimeout(() => {
+        setNotifications(prev => prev.filter(n => n.id !== id));
+      }, duration);
+    }
+  }, []);
+
+  const removeNotification = useCallback((id) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  }, []);
+
+  const showSuccess = useCallback((message, title = null, duration = 4000) => {
+    addNotification({ type: 'success', message, title, duration });
+  }, [addNotification]);
+
+  const showError = useCallback((message, title = 'Error', duration = 6000) => {
+    addNotification({ type: 'error', message, title, duration });
+  }, [addNotification]);
+
+  const showWarning = useCallback((message, title = 'Warning', duration = 5000) => {
+    addNotification({ type: 'warning', message, title, duration });
+  }, [addNotification]);
+
+  const showInfo = useCallback((message, title = null, duration = 4000) => {
+    addNotification({ type: 'info', message, title, duration });
+  }, [addNotification]);
+
+  return {
+    notifications,
+    removeNotification,
+    showSuccess,
+    showError,
+    showWarning,
+    showInfo
+  };
+};
+
+// Components (keeping the original components but removing alert calls)
 const FileUploadStep = ({ onFileUpload }) => {
   const acceptedTypes = '.csv,.xlsx,.xls';
 
@@ -128,7 +230,7 @@ const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, mappingNam
         </h2>
         <button
           onClick={onProcessFiles}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          className="px-4 pycd vt-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
         >
           Process Files
         </button>
@@ -138,7 +240,7 @@ const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, mappingNam
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
         <h3 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
           <Download className="text-green-600" size={16} />
-          Save & Load Field Mappings
+          TSD Field Mappings
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Save Mapping */}
@@ -624,7 +726,7 @@ const ProgressIndicator = ({ current, total }) => {
         />
       </div>
       <p className="text-xs text-blue-600 mt-1">
-        Please wait while we process your records through the Gemini API...
+        Please wait while we process your records through the standardization API...
       </p>
     </div>
   );
@@ -646,6 +748,9 @@ const useCustomerExtractor = () => {
   const [mappingName, setMappingName] = useState('');
   const [showOriginalModal, setShowOriginalModal] = useState(false);
   const [selectedOriginalRecord, setSelectedOriginalRecord] = useState(null);
+
+  // Initialize snackbar
+  const { notifications, removeNotification, showSuccess, showError, showWarning, showInfo } = useSnackbar();
 
   // Data processing utilities
   const parseCSV = (content) => {
@@ -929,7 +1034,7 @@ const useCustomerExtractor = () => {
 
       if (result.success && result.data) {
         return {
-          companyName: result.data.CompanyName || companyName,
+          companyName: result.data["Company Name"] || companyName,
           address1: result.data["Address 1"] || '',
           address2: result.data["Address 2"] || '',
           city: result.data["City"] || '',
@@ -940,7 +1045,7 @@ const useCustomerExtractor = () => {
         throw new Error('Invalid response from API');
       }
     } catch (error) {
-      console.error('Error calling Gemini API:', error);
+      console.error('Error calling standardization API:', error);
       // Return original data if API fails
       return {
         companyName: companyName,
@@ -953,10 +1058,10 @@ const useCustomerExtractor = () => {
     }
   };
 
-  // Mapping save/load functions
+  // Mapping save/load functions with snackbar notifications
   const exportMapping = useCallback(() => {
     if (!mappingName.trim()) {
-      alert('Please enter a name for the mapping.');
+      showWarning('Please enter a name for the mapping.');
       return;
     }
 
@@ -985,12 +1090,12 @@ const useCustomerExtractor = () => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      alert(`Mapping "${mappingName}" has been saved successfully!`);
+      showSuccess(`Mapping "${mappingName}" has been saved successfully!`, 'Mapping Saved');
     } catch (error) {
       console.error('Error exporting mapping:', error);
-      alert('An error occurred while saving the mapping. Please try again.');
+      showError('An error occurred while saving the mapping. Please try again.');
     }
-  }, [mappingName, files, columnMappings, primaryFileIndex]);
+  }, [mappingName, files, columnMappings, primaryFileIndex, showSuccess, showError, showWarning]);
 
   const importMapping = useCallback(async (event) => {
     const file = event.target.files?.[0];
@@ -1007,7 +1112,7 @@ const useCustomerExtractor = () => {
 
       // Check if current files match the mapping
       if (!files || files.length === 0) {
-        alert('Please upload files first before importing a mapping.');
+        showWarning('Please upload files first before importing a mapping.');
         return;
       }
 
@@ -1019,16 +1124,16 @@ const useCustomerExtractor = () => {
         setPrimaryFileIndex(mappingData.primaryFileIndex);
       }
 
-      alert(`Mapping "${mappingData.name}" has been loaded successfully!`);
+      showSuccess(`Mapping "${mappingData.name}" has been loaded successfully!`, 'Mapping Loaded');
       
     } catch (error) {
       console.error('Error importing mapping:', error);
-      alert('Error loading mapping file. Please check that it is a valid mapping file.');
+      showError('Error loading mapping file. Please check that it is a valid mapping file.');
     }
 
     // Reset the file input
     event.target.value = '';
-  }, [files]);
+  }, [files, showSuccess, showError, showWarning]);
 
   // Memoized computed values
   const filteredData = useMemo(() => {
@@ -1050,7 +1155,7 @@ const useCustomerExtractor = () => {
     [filteredData, processedData, selectedRecords]
   );
 
-  // File upload handler
+  // File upload handler with snackbar notifications
   const handleFileUpload = useCallback(async (event) => {
     try {
       const uploadedFiles = Array.from(event.target.files);
@@ -1099,7 +1204,7 @@ const useCustomerExtractor = () => {
       }
 
       if (fileData.length === 0 && filesNeedingWorksheetSelection.length === 0) {
-        alert('No valid files were processed. Please check your file formats.');
+        showError('No valid files were processed. Please check your file formats.', 'Upload Failed');
         return;
       }
 
@@ -1108,6 +1213,7 @@ const useCustomerExtractor = () => {
         setFilesWithWorksheets(filesNeedingWorksheetSelection);
         setFiles(fileData); // Store already processed files
         setStep(STEPS.WORKSHEET_SELECTION);
+        showInfo(`Found multiple worksheets in ${filesNeedingWorksheetSelection.length} file(s). Please select the correct worksheets to continue.`, 'Worksheet Selection Required');
       } else {
         // All files processed, go to mapping
         setFiles(fileData);
@@ -1121,12 +1227,13 @@ const useCustomerExtractor = () => {
         const orderFileIndex = fileData.findIndex(file => file.name.toLowerCase().includes('order'));
         setPrimaryFileIndex(orderFileIndex >= 0 ? orderFileIndex : 0);
         setStep(STEPS.MAPPING);
+        showSuccess(`Successfully processed ${fileData.length} file(s). Column mappings have been automatically detected where possible.`, 'Files Uploaded');
       }
     } catch (error) {
       console.error('Error uploading files:', error);
-      alert('An error occurred while processing the files. Please try again.');
+      showError('An error occurred while processing the files. Please try again.');
     }
-  }, []);
+  }, [showSuccess, showError, showInfo]);
 
   const handleWorksheetSelection = useCallback((fileIndex, worksheetIndex) => {
     setFilesWithWorksheets(prev => {
@@ -1165,11 +1272,12 @@ const useCustomerExtractor = () => {
       const orderFileIndex = allFiles.findIndex(file => file.name.toLowerCase().includes('order'));
       setPrimaryFileIndex(orderFileIndex >= 0 ? orderFileIndex : 0);
       setStep(STEPS.MAPPING);
+      showSuccess(`Successfully processed ${allFiles.length} file(s) with selected worksheets.`, 'Worksheets Processed');
     } catch (error) {
       console.error('Error processing worksheet selections:', error);
-      alert('An error occurred while processing the worksheet selections. Please try again.');
+      showError('An error occurred while processing the worksheet selections. Please try again.');
     }
-  }, [files, filesWithWorksheets]);
+  }, [files, filesWithWorksheets, showSuccess, showError]);
 
   const updateColumnMapping = useCallback((fileIndex, field, column) => {
     setColumnMappings(prev => ({
@@ -1318,11 +1426,12 @@ const useCustomerExtractor = () => {
       setSelectedRecords(initialSelection);
       
       setStep(STEPS.RESULTS);
+      showSuccess(`Successfully processed ${uniqueRecords.length} records from ${files.length} file(s). Records with complete addresses have been pre-selected for export.`, 'Processing Complete');
     } catch (error) {
       console.error('Error processing files:', error);
-      alert('An error occurred while processing the files. Please try again.');
+      showError('An error occurred while processing the files. Please try again.');
     }
-  }, [files, columnMappings, primaryFileIndex]);
+  }, [files, columnMappings, primaryFileIndex, showSuccess, showError]);
 
   const standardizeRecords = async (indices) => {
     setIsStandardizing(true);
@@ -1366,14 +1475,16 @@ const useCustomerExtractor = () => {
       setProcessedData(updatedData);
       
       const recordCount = indices.length;
-      alert(recordCount === processedData.length 
-        ? `Successfully standardized all ${recordCount} records.`
-        : `Successfully standardized ${recordCount} record${recordCount !== 1 ? 's' : ''}.`
+      showSuccess(
+        recordCount === processedData.length 
+          ? `Successfully standardized all ${recordCount} records.`
+          : `Successfully standardized ${recordCount} record${recordCount !== 1 ? 's' : ''}.`,
+        'Standardization Complete'
       );
       
     } catch (error) {
       console.error('Error standardizing records:', error);
-      alert('An error occurred while standardizing the records. Please try again.');
+      showError('An error occurred while standardizing the records. Please try again.');
     } finally {
       setIsStandardizing(false);
       setStandardizationProgress({ current: 0, total: 0 });
@@ -1382,11 +1493,11 @@ const useCustomerExtractor = () => {
 
   const standardizeSelectedRecords = useCallback(async () => {
     if (selectedRecords.size === 0) {
-      alert('Please select at least one record to standardize.');
+      showWarning('Please select at least one record to standardize.');
       return;
     }
     await standardizeRecords(Array.from(selectedRecords));
-  }, [selectedRecords, processedData]);
+  }, [selectedRecords, processedData, showWarning]);
 
   const standardizeAllRecords = useCallback(async () => {
     const allIndices = processedData.map((_, index) => index);
@@ -1522,12 +1633,15 @@ const useCustomerExtractor = () => {
         downloadCSV(customerLocationsContent, 'Customer Locations.csv');
       }
 
-      alert(`Export complete! Downloaded ${customerNames.length} customer names${customerLocations.length > 0 ? ` and ${customerLocations.length} additional locations` : ''}.`);
+      showSuccess(
+        `Downloaded ${customerNames.length} customer names${customerLocations.length > 0 ? ` and ${customerLocations.length} additional locations` : ''}.`,
+        'Export Complete'
+      );
     } catch (error) {
       console.error('Error exporting data:', error);
-      alert('An error occurred while exporting the data. Please try again.');
+      showError('An error occurred while exporting the data. Please try again.');
     }
-  }, [processedData, selectedRecords, showMissingAddresses, showDuplicates]);
+  }, [processedData, selectedRecords, showMissingAddresses, showDuplicates, showSuccess, showError]);
 
   const resetAll = useCallback(() => {
     setStep(STEPS.UPLOAD);
@@ -1545,13 +1659,14 @@ const useCustomerExtractor = () => {
     setMappingName('');
     setShowOriginalModal(false);
     setSelectedOriginalRecord(null);
-  }, []);
+    showInfo('Application has been reset. You can now upload new files.', 'Reset Complete');
+  }, [showInfo]);
 
   return {
     files, filesWithWorksheets, processedData, columnMappings, primaryFileIndex, showMissingAddresses, showDuplicates,
     selectedRecords, editingCell, step, isStandardizing, standardizationProgress, mappingName,
-    showOriginalModal, selectedOriginalRecord,
-    setShowMissingAddresses, setShowDuplicates, setPrimaryFileIndex, setMappingName,
+    showOriginalModal, selectedOriginalRecord, notifications,
+    setShowMissingAddresses, setShowDuplicates, setPrimaryFileIndex, setMappingName, removeNotification,
     handleFileUpload, handleWorksheetSelection, handleContinueFromWorksheetSelection, updateColumnMapping, processFiles, standardizeSelectedRecords, 
     standardizeAllRecords, toggleRecordSelection, toggleSelectAll, handleCellEdit, 
     handleCellClick, handleCellBlur, exportToCSV, resetAll, exportMapping, importMapping,
@@ -1578,6 +1693,7 @@ const CustomerExtractor = () => {
     mappingName,
     showOriginalModal,
     selectedOriginalRecord,
+    notifications,
     
     // Actions
     handleFileUpload,
@@ -1602,6 +1718,7 @@ const CustomerExtractor = () => {
     importMapping,
     viewOriginalData,
     closeOriginalModal,
+    removeNotification,
     
     // Computed
     filteredData,
@@ -1610,11 +1727,13 @@ const CustomerExtractor = () => {
 
   return (
     <div className="max-w-7xl mx-auto p-6 bg-gray-50 min-h-screen">
+      <SnackbarContainer notifications={notifications} onRemove={removeNotification} />
+      
       <div className="bg-white rounded-lg shadow-lg p-6">
         <header className="mb-6">
           <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
             <FileText className="text-blue-600" />
-            CSV/Excel Company Address Extractor
+            ForgeOS - Onboarding
           </h1>
         </header>
 

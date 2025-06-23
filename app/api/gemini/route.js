@@ -1,4 +1,3 @@
-// app/api/standardize-address/route.js
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Verify API key is present
@@ -24,7 +23,7 @@ export async function POST(request) {
     }
 
     // Construct the prompt
-    const prompt = `Rules:
+    const prompt = `Address Standardization Rules:
     1. Detect if a field contains multiple address elements
     -- If the field contains the entire address including street: Break the single-line address into separate fields: "Address 1", "Address 2", "City", "State", and "Zip Code".
     -- If the field contains city, state, and zip code: Break it into "City", "State", and "Zip Code".
@@ -33,7 +32,31 @@ export async function POST(request) {
     4. Standardize street suffixes (St -> Street, Ave -> Avenue, Rd -> Road, Dr -> Drive, Blvd -> Boulevard, Ln -> Lane, Ct -> Court).
     5. Clean and format city names properly.
     6. Keep the zip code as-is but remove any invalid characters (except for dashes).
+
+    Company Name Standardization Rules:
+    1. Convert company names from ALL CAPS to proper Initial Case formatting, while preserving names that are legitimately written in all capitals.
+    2. Preserve ALL CAPS for these categories:
+    -- Acronyms/Initialisms: IBM, NASA, AT&T, UPS, CVS, AMD, HP, GM, API, AWS, SAP
+    -- Stock tickers used as names: JPM, BAC, WMT
+    -- Technology: IBM, HP, AMD, SAP, AWS
+    -- Financial: JPM, BAC, AIG, AXA
+    -- Telecommunications: AT&T, T-Mobile, BT
+    -- Retail: CVS, JCP, H&M
+    -- Transportation: UPS, FedEx, AAL
+    -- Media: CNN, BBC, NBC (when part of company names)
+    3. Mixed formatting: Apply Initial Case to individual words while preserving legitimate caps:
+    -- IBM CORPORATION → IBM Corporation
+    -- AT&T WIRELESS → AT&T Wireless
+    -- JP MORGAN CHASE → JP Morgan Chase
+    4. Examples:
+    -- APPLE INC → Apple Inc
+    -- MICROSOFT CORPORATION → Microsoft Corporation
+    -- INTERNATIONAL BUSINESS MACHINES → IBM
+    -- AMAZON WEB SERVICES → Amazon Web Services
+    -- JPMORGAN CHASE & CO → JPMorgan Chase & Co
+
     Return format (valid JSON only): {
+      "Company Name": "standardized company name",
       "Address 1": "cleaned primary address",
       "Address 2": "suite/unit info if any",
       "City": "cleaned city",
@@ -49,22 +72,23 @@ export async function POST(request) {
     const text = response.text();
 
     // Parse the JSON response from Gemini
-    let standardizedAddress;
+    let standardizedData;
     try {
       // Clean the response text to extract JSON (remove markdown code block)
       const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/);
       if (jsonMatch && jsonMatch[1]) {
-        standardizedAddress = JSON.parse(jsonMatch[1]);
+        standardizedData = JSON.parse(jsonMatch[1]);
       } else {
         // Fallback for responses without markdown, try direct parse
-        standardizedAddress = JSON.parse(text);
+        standardizedData = JSON.parse(text);
       }
     } catch (parseError) {
       console.error('Error parsing Gemini response:', parseError);
       console.error('Raw response:', text);
 
       // Fallback response structure
-      standardizedAddress = {
+      standardizedData = {
+        "Company Name": companyName,
         "Address 1": address,
         "Address 2": "",
         "City": "",
@@ -75,11 +99,12 @@ export async function POST(request) {
 
     // Ensure all required fields exist
     const finalResponse = {
-      "Address 1": standardizedAddress["Address 1"] || "",
-      "Address 2": standardizedAddress["Address 2"] || "",
-      "City": standardizedAddress["City"] || "",
-      "State": standardizedAddress["State"] || "",
-      "Zip Code": standardizedAddress["Zip Code"] || ""
+      "Company Name": standardizedData["Company Name"] || companyName,
+      "Address 1": standardizedData["Address 1"] || "",
+      "Address 2": standardizedData["Address 2"] || "",
+      "City": standardizedData["City"] || "",
+      "State": standardizedData["State"] || "",
+      "Zip Code": standardizedData["Zip Code"] || ""
     };
 
     return Response.json({
@@ -89,11 +114,11 @@ export async function POST(request) {
     });
 
   } catch (error) {
-    console.error('Error in address standardization:', error);
+    console.error('Error in address and company name standardization:', error);
 
     return Response.json(
       {
-        error: 'Failed to standardize address',
+        error: 'Failed to standardize address and company name',
         details: error.message
       },
       { status: 500 }
