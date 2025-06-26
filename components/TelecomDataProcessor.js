@@ -14,6 +14,16 @@ const FILE_TYPES = {
 };
 
 const FIELD_CATEGORIES = {
+  linking: {
+    label: 'Record Linking',
+    icon: <Link size={16} />,
+    fields: {
+      accountNumber: 'Account Number',
+      customerIdPrimary: 'Customer ID (Primary)',
+      customerIdSecondary: 'Customer ID (Secondary)',
+      locationKey: 'Location Identifier'
+    }
+  },
   customer: {
     label: 'Customer & Location',
     icon: <FileText size={16} />,
@@ -39,16 +49,6 @@ const FIELD_CATEGORIES = {
       bandwidth: 'Bandwidth/Capacity',
       orderNumber: 'Order Number',
       supplier: 'Supplier/Provider'
-    }
-  },
-  linking: {
-    label: 'Record Linking',
-    icon: <Link size={16} />,
-    fields: {
-      accountNumber: 'Account Number',
-      customerIdPrimary: 'Customer ID (Primary)',
-      customerIdSecondary: 'Customer ID (Secondary)',
-      locationKey: 'Location Identifier'
     }
   },
   billing: {
@@ -1847,7 +1847,7 @@ const ProgressIndicator = memo(({ current, total }) => {
 });
 
 // ==================== MAIN HOOK ====================
-const useEnhancedTelecomExtractor = () => {
+const useTelecomExtractor = () => {
   const [files, setFiles] = useState([]);
   const [filesWithWorksheets, setFilesWithWorksheets] = useState([]);
   const [processedData, setProcessedData] = useState([]);
@@ -2689,7 +2689,7 @@ const useEnhancedTelecomExtractor = () => {
 };
 
 // ==================== MAIN COMPONENT ====================
-const EnhancedTelecomExtractor = () => {
+const TelecomExtractor = () => {
   const {
     // State
     files,
@@ -2738,7 +2738,7 @@ const EnhancedTelecomExtractor = () => {
     // Computed
     filteredData,
     selectedCount
-  } = useEnhancedTelecomExtractor();
+  } = useTelecomExtractor();
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 lg:p-6">
@@ -2748,7 +2748,7 @@ const EnhancedTelecomExtractor = () => {
         <header className="mb-6">
           <h1 className="text-2xl lg:text-3xl font-bold text-gray-800 flex items-center gap-2">
             <BarChart3 className="text-blue-600" />
-            ForgeOS - Enhanced Telecom Data Extractor
+            ForgeOS - Telecom Data Extractor
           </h1>
           <p className="text-gray-600 mt-2">Extract and link customer data from order and commission files across multiple telecom providers</p>
         </header>
@@ -2832,4 +2832,4 @@ const EnhancedTelecomExtractor = () => {
   );
 };
 
-export default EnhancedTelecomExtractor;
+export default TelecomExtractor;

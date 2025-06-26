@@ -211,14 +211,18 @@ const WorksheetSelectionStep = ({ filesWithWorksheets, onWorksheetSelection, onC
 };
 
 const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, mappingName, onUpdateMapping, onSetPrimaryFile, onProcessFiles, onSetMappingName, onExportMapping, onImportMapping }) => {
-  const fieldTypes = ['companyName', 'address1', 'address2', 'city', 'state', 'zipCode'];
+  const fieldTypes = ['companyName', 'locationName', 'locationType', 'status', 'address1', 'address2', 'city', 'state', 'zipCode', 'country'];
   const fieldLabels = {
     companyName: 'Company Name',
+    locationName: 'Location Name',
+    locationType: 'Location Type',
+    status: 'Status',
     address1: 'Address 1', 
     address2: 'Address 2',
     city: 'City',
     state: 'State',
-    zipCode: 'Zip Code'
+    zipCode: 'Zip Code',
+    country: 'Country'
   };
 
   return (
@@ -230,7 +234,7 @@ const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, mappingNam
         </h2>
         <button
           onClick={onProcessFiles}
-          className="px-4 pycd vt-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
         >
           Process Files
         </button>
@@ -345,7 +349,7 @@ const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, mappingNam
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
               {fieldTypes.map(fieldType => (
                 <div key={fieldType}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -381,7 +385,7 @@ const OriginalDataModal = ({ isOpen, record, onClose }) => {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
+      <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-gray-800">Original Data vs Standardized</h2>
           <button
@@ -398,11 +402,15 @@ const OriginalDataModal = ({ isOpen, record, onClose }) => {
               <h3 className="font-medium text-gray-700 mb-3 text-center">Original Data</h3>
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-2">
                 <div><strong>Company Name:</strong> {record.originalData.companyName}</div>
+                <div><strong>Location Name:</strong> {record.originalData.locationName}</div>
+                <div><strong>Location Type:</strong> {record.originalData.locationType}</div>
+                <div><strong>Status:</strong> {record.originalData.status}</div>
                 <div><strong>Address 1:</strong> {record.originalData.address1}</div>
                 <div><strong>Address 2:</strong> {record.originalData.address2}</div>
                 <div><strong>City:</strong> {record.originalData.city}</div>
                 <div><strong>State:</strong> {record.originalData.state}</div>
                 <div><strong>Zip Code:</strong> {record.originalData.zipCode}</div>
+                <div><strong>Country:</strong> {record.originalData.country}</div>
               </div>
             </div>
             
@@ -410,11 +418,15 @@ const OriginalDataModal = ({ isOpen, record, onClose }) => {
               <h3 className="font-medium text-gray-700 mb-3 text-center">Standardized Data</h3>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-2">
                 <div><strong>Company Name:</strong> {record.companyName}</div>
+                <div><strong>Location Name:</strong> {record.locationName}</div>
+                <div><strong>Location Type:</strong> {record.locationType}</div>
+                <div><strong>Status:</strong> {record.status}</div>
                 <div><strong>Address 1:</strong> {record.address1}</div>
                 <div><strong>Address 2:</strong> {record.address2}</div>
                 <div><strong>City:</strong> {record.city}</div>
                 <div><strong>State:</strong> {record.state}</div>
                 <div><strong>Zip Code:</strong> {record.zipCode}</div>
+                <div><strong>Country:</strong> {record.country}</div>
               </div>
             </div>
           </div>
@@ -542,11 +554,15 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
                 />
               </th>
               <th className="border border-gray-300 px-4 py-2 text-left">Company Name</th>
+              <th className="border border-gray-300 px-4 py-2 text-left">Location Name</th>
+              <th className="border border-gray-300 px-4 py-2 text-left">Location Type</th>
+              <th className="border border-gray-300 px-4 py-2 text-left">Status</th>
               <th className="border border-gray-300 px-4 py-2 text-left">Address 1</th>
               <th className="border border-gray-300 px-4 py-2 text-left">Address 2</th>
               <th className="border border-gray-300 px-4 py-2 text-left">City</th>
               <th className="border border-gray-300 px-4 py-2 text-left">State</th>
               <th className="border border-gray-300 px-4 py-2 text-left">Zip Code</th>
+              <th className="border border-gray-300 px-4 py-2 text-left">Country</th>
               <th className="border border-gray-300 px-4 py-2 text-left">Source</th>
             </tr>
           </thead>
@@ -556,6 +572,8 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
 
               if (record.isDuplicate) {
                 rowClass = 'bg-yellow-100';
+              } else if (record.isNearDuplicate) {
+                rowClass = 'bg-orange-100';
               } else if (record.isSimilar) {
                 rowClass = 'bg-red-100';
               } else if (record.isStandardized) {
@@ -588,6 +606,23 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
                         />
                       </div>
                     )}
+                    {record.isNearDuplicate && (
+                      <div className="absolute top-1 left-1">
+                        <div
+                          className="w-2 h-2 bg-orange-500 rounded-full cursor-help"
+                          title={`Near duplicate detected. Original name: "${record.originalCompanyName}"`}
+                        />
+                      </div>
+                    )}
+                  </td>
+                  <td className="border border-gray-300 px-2 py-1">
+                    {renderEditableCell(record, 'locationName', originalIndex)}
+                  </td>
+                  <td className="border border-gray-300 px-2 py-1">
+                    {renderEditableCell(record, 'locationType', originalIndex)}
+                  </td>
+                  <td className="border border-gray-300 px-2 py-1">
+                    {renderEditableCell(record, 'status', originalIndex)}
                   </td>
                   <td className="border border-gray-300 px-2 py-1">
                     {renderEditableCell(record, 'address1', originalIndex)}
@@ -603,6 +638,9 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
                   </td>
                   <td className="border border-gray-300 px-2 py-1">
                     {renderEditableCell(record, 'zipCode', originalIndex)}
+                  </td>
+                  <td className="border border-gray-300 px-2 py-1">
+                    {renderEditableCell(record, 'country', originalIndex)}
                   </td>
                   <td className="border border-gray-300 px-2 py-1 text-sm">
                     <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
@@ -637,6 +675,10 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
             Exact duplicates
           </div>
           <div className="flex items-center">
+            <div className="w-4 h-4 bg-orange-100 border border-orange-300 mr-2" />
+            Near duplicate companies
+          </div>
+          <div className="flex items-center">
             <div className="w-4 h-4 bg-red-100 border border-red-300 mr-2" />
             Similar addresses (same company)
           </div>
@@ -647,6 +689,10 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
           <div className="flex items-center">
             <div className="w-2 h-2 bg-green-500 rounded-full mr-2 cursor-pointer" />
             Click to view original data
+          </div>
+          <div className="flex items-center">
+            <div className="w-2 h-2 bg-orange-500 rounded-full mr-2" />
+            Near duplicate indicator
           </div>
           <div className="flex items-center">
             <div className="w-4 h-4 bg-green-100 border border-green-300 mr-2 rounded text-xs flex items-center justify-center">
@@ -751,6 +797,223 @@ const useCustomerExtractor = () => {
 
   // Initialize snackbar
   const { notifications, removeNotification, showSuccess, showError, showWarning, showInfo } = useSnackbar();
+
+  // String similarity utilities
+  const levenshteinDistance = (str1, str2) => {
+    const matrix = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null));
+    
+    for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
+    for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
+    
+    for (let j = 1; j <= str2.length; j++) {
+      for (let i = 1; i <= str1.length; i++) {
+        const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+        matrix[j][i] = Math.min(
+          matrix[j][i - 1] + 1,
+          matrix[j - 1][i] + 1,
+          matrix[j - 1][i - 1] + indicator
+        );
+      }
+    }
+    
+    return matrix[str2.length][str1.length];
+  };
+
+  const jaccardSimilarity = (str1, str2) => {
+    const words1 = new Set(str1.toLowerCase().split(/\s+/).filter(word => word.length > 0));
+    const words2 = new Set(str2.toLowerCase().split(/\s+/).filter(word => word.length > 0));
+    
+    const intersection = new Set([...words1].filter(word => words2.has(word)));
+    const union = new Set([...words1, ...words2]);
+    
+    return union.size > 0 ? intersection.size / union.size : 0;
+  };
+
+  const fuzzyWordMatch = (word1, word2) => {
+    if (word1 === word2) return 1;
+    
+    // Handle common abbreviations and variations
+    const normalizeWord = (word) => {
+      const abbrevMap = {
+        'inc': 'incorporated',
+        'corp': 'corporation',
+        'co': 'company',
+        'llc': 'limited liability company',
+        'ltd': 'limited',
+        'mech': 'mechanical',
+        'svc': 'service',
+        'svcs': 'services',
+        'tech': 'technology',
+        'sys': 'systems',
+        'sol': 'solutions',
+        'grp': 'group',
+        'mgmt': 'management',
+        'dev': 'development',
+        'mfg': 'manufacturing',
+        'dist': 'distribution',
+        'equip': 'equipment'
+      };
+      
+      const normalized = word.toLowerCase().replace(/[^\w]/g, '');
+      return abbrevMap[normalized] || normalized;
+    };
+    
+    const norm1 = normalizeWord(word1);
+    const norm2 = normalizeWord(word2);
+    
+    if (norm1 === norm2) return 0.9; // High similarity for normalized matches
+    
+    // Check if one is a substring of the other (like "mech" in "mechanical")
+    if (norm1.includes(norm2) || norm2.includes(norm1)) {
+      const minLen = Math.min(norm1.length, norm2.length);
+      const maxLen = Math.max(norm1.length, norm2.length);
+      return minLen / maxLen * 0.8; // Substring match
+    }
+    
+    // Levenshtein for the individual words
+    const distance = levenshteinDistance(norm1, norm2);
+    const maxLength = Math.max(norm1.length, norm2.length);
+    return maxLength > 0 ? Math.max(0, 1 - distance / maxLength) : 0;
+  };
+
+  const enhancedJaccardSimilarity = (str1, str2) => {
+    const words1 = str1.toLowerCase().split(/\s+/).filter(word => word.length > 0);
+    const words2 = str2.toLowerCase().split(/\s+/).filter(word => word.length > 0);
+    
+    let matchScore = 0;
+    let totalWords = Math.max(words1.length, words2.length);
+    
+    const used2 = new Set();
+    
+    for (const word1 of words1) {
+      let bestMatch = 0;
+      let bestIndex = -1;
+      
+      for (let i = 0; i < words2.length; i++) {
+        if (used2.has(i)) continue;
+        const similarity = fuzzyWordMatch(word1, words2[i]);
+        if (similarity > bestMatch && similarity > 0.7) { // Threshold for considering a match
+          bestMatch = similarity;
+          bestIndex = i;
+        }
+      }
+      
+      if (bestIndex !== -1) {
+        matchScore += bestMatch;
+        used2.add(bestIndex);
+      }
+    }
+    
+    return totalWords > 0 ? matchScore / totalWords : 0;
+  };
+
+  const normalizeCompanyName = (name) => {
+    // Remove common company suffixes for comparison
+    const suffixes = /\b(inc|incorporated|corp|corporation|company|co|llc|limited liability company|ltd|limited)\b\.?$/gi;
+    return name.replace(suffixes, '').trim();
+  };
+
+  const calculateCompanySimilarity = (name1, name2) => {
+    // Quick exact match check
+    if (name1.toLowerCase() === name2.toLowerCase()) return 1;
+    
+    // Normalize by removing company suffixes for better comparison
+    const norm1 = normalizeCompanyName(name1);
+    const norm2 = normalizeCompanyName(name2);
+    
+    // Calculate multiple similarity scores on normalized names
+    const jaccard = jaccardSimilarity(norm1, norm2);
+    const enhancedJaccard = enhancedJaccardSimilarity(norm1, norm2);
+    const levenshtein = 1 - levenshteinDistance(norm1.toLowerCase(), norm2.toLowerCase()) / 
+                      Math.max(norm1.length, norm2.length);
+    
+    // Weighted combination - enhanced Jaccard gets highest weight since it handles abbreviations
+    // Increased weight for enhanced Jaccard and lowered threshold by using better weighting
+    const similarity = (enhancedJaccard * 0.6) + (jaccard * 0.25) + (levenshtein * 0.15);
+    
+    return similarity;
+  };
+
+  const findNearDuplicateCompanies = (records) => {
+    // Group by company name for initial processing
+    const companyGroups = new Map();
+    
+    records.forEach((record, index) => {
+      const companyKey = record.companyName.toLowerCase().trim();
+      if (!companyGroups.has(companyKey)) {
+        companyGroups.set(companyKey, []);
+      }
+      companyGroups.get(companyKey).push({ ...record, originalIndex: index });
+    });
+    
+    // Get unique company names and sort them
+    const uniqueCompanies = Array.from(companyGroups.keys()).sort();
+    const nearDuplicateGroups = [];
+    const processed = new Set();
+    
+    // Compare adjacent company names (after sorting) for efficiency
+    for (let i = 0; i < uniqueCompanies.length; i++) {
+      if (processed.has(uniqueCompanies[i])) continue;
+      
+      const currentGroup = [uniqueCompanies[i]];
+      processed.add(uniqueCompanies[i]);
+      
+      // Check next few companies (sorted order means similar names are likely nearby)
+      for (let j = i + 1; j < Math.min(i + 10, uniqueCompanies.length); j++) {
+        if (processed.has(uniqueCompanies[j])) continue;
+        
+        const similarity = calculateCompanySimilarity(uniqueCompanies[i], uniqueCompanies[j]);
+        
+        // Threshold for considering companies as near duplicates (lowered to catch more cases)
+        if (similarity >= 0.75) {
+          currentGroup.push(uniqueCompanies[j]);
+          processed.add(uniqueCompanies[j]);
+        }
+      }
+      
+      if (currentGroup.length > 1) {
+        nearDuplicateGroups.push(currentGroup);
+      }
+    }
+    
+    // Mark records as near duplicates
+    const updatedRecords = [...records];
+    
+    nearDuplicateGroups.forEach(group => {
+      // Find the "best" company name in the group (longest, most complete)
+      const canonical = group.reduce((best, current) => {
+        const currentRecords = companyGroups.get(current);
+        const bestRecords = companyGroups.get(best);
+        
+        // Prefer names from primary file, then by completeness
+        const currentFromPrimary = currentRecords.some(r => r.source === files[primaryFileIndex]?.name);
+        const bestFromPrimary = bestRecords.some(r => r.source === files[primaryFileIndex]?.name);
+        
+        if (currentFromPrimary && !bestFromPrimary) return current;
+        if (!currentFromPrimary && bestFromPrimary) return best;
+        
+        // If same priority, prefer longer/more complete name
+        return current.length > best.length ? current : best;
+      });
+      
+      // Mark all records in this group with the canonical name and near-duplicate status
+      group.forEach(companyName => {
+        if (companyName !== canonical) {
+          const recordsToUpdate = companyGroups.get(companyName);
+          recordsToUpdate.forEach(record => {
+            updatedRecords[record.originalIndex] = {
+              ...updatedRecords[record.originalIndex],
+              companyName: companyGroups.get(canonical)[0].companyName, // Use original casing
+              isNearDuplicate: true,
+              originalCompanyName: record.companyName
+            };
+          });
+        }
+      });
+    });
+    
+    return updatedRecords;
+  };
 
   // Data processing utilities
   const parseCSV = (content) => {
@@ -868,7 +1131,7 @@ const useCustomerExtractor = () => {
           let score = 0;
           
           // Score for relevant keywords in headers
-          const relevantKeywords = ['company', 'customer', 'business', 'organization', 'client', 'address', 'city', 'state', 'zip'];
+          const relevantKeywords = ['company', 'customer', 'business', 'organization', 'client', 'address', 'city', 'state', 'zip', 'location', 'type', 'status', 'country'];
           headers.forEach(header => {
             const lowerHeader = header.toLowerCase();
             relevantKeywords.forEach(keyword => {
@@ -964,7 +1227,6 @@ const useCustomerExtractor = () => {
     const mapping = {};
     
     // Enhanced keyword matching with exact matches and partial matches
-    // Prioritize first occurrence of duplicate field names and avoid account-related fields
     const fieldMatchers = {
       companyName: (header) => {
         const lower = header.toLowerCase();
@@ -972,39 +1234,58 @@ const useCustomerExtractor = () => {
           lower.includes(keyword) && !lower.includes('id') && !lower.includes('contact') && !lower.includes('account')
         );
       },
+      locationName: (header) => {
+        const lower = header.toLowerCase();
+        return ['location name', 'site name', 'facility name', 'branch name'].some(keyword => 
+          lower.includes(keyword)
+        ) || (lower.includes('location') && lower.includes('name'));
+      },
+      locationType: (header) => {
+        const lower = header.toLowerCase();
+        return ['location type', 'site type', 'facility type', 'branch type'].some(keyword => 
+          lower.includes(keyword)
+        ) || (lower.includes('location') && lower.includes('type'));
+      },
+      status: (header) => {
+        const lower = header.toLowerCase();
+        return ['status', 'state', 'condition'].some(keyword => 
+          lower === keyword || (lower.includes(keyword) && !lower.includes('account'))
+        );
+      },
       address1: (header) => {
         const lower = header.toLowerCase();
-        // Exact match first, then avoid account addresses and duplicates
         return lower === 'address 1' || 
                (lower.includes('address') && lower.includes('1') && 
                 !lower.includes('account') && !lower.includes('('));
       },
       address2: (header) => {
         const lower = header.toLowerCase();
-        // Handle the space-prefixed version and avoid account addresses and duplicates
         return lower === 'address 2' || lower === ' address 2' || 
                (lower.includes('address') && lower.includes('2') && 
                 !lower.includes('account') && !lower.includes('('));
       },
       city: (header) => {
         const lower = header.toLowerCase();
-        // Exact match first, avoid "Account City", "City, State" combinations, and duplicates
         return lower === 'city' || 
                (lower.includes('city') && !lower.includes('account') && 
                 !lower.includes(',') && !lower.includes('('));
       },
       state: (header) => {
         const lower = header.toLowerCase();
-        // Exact match first, avoid "Account State", "City, State" combinations, and duplicates
         return lower === 'state' || 
                (lower.includes('state') && !lower.includes('account') && 
                 !lower.includes(',') && !lower.includes('('));
       },
       zipCode: (header) => {
         const lower = header.toLowerCase();
-        // Exact matches first, avoid "Account Postal Code" and duplicates
         return lower === 'postal code' || lower === 'zip code' || lower === 'zipcode' || lower === 'zip' ||
                (lower.includes('postal') && !lower.includes('account') && !lower.includes('('));
+      },
+      country: (header) => {
+        const lower = header.toLowerCase();
+        return ['country', 'nation'].some(keyword => 
+          lower.includes(keyword) && !lower.includes('account')
+        );
       }
     };
 
@@ -1021,12 +1302,19 @@ const useCustomerExtractor = () => {
     return mapping;
   };
 
-  const standardizeWithGemini = async (companyName, address) => {
+  const standardizeWithGemini = async (companyName, address, locationName = '', locationType = '', country = '', status = '') => {
     try {
       const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyName, address }),
+        body: JSON.stringify({ 
+          companyName, 
+          address, 
+          locationName, 
+          locationType, 
+          country, 
+          status 
+        }),
       });
 
       if (!response.ok) throw new Error(`API call failed: ${response.status}`);
@@ -1035,11 +1323,15 @@ const useCustomerExtractor = () => {
       if (result.success && result.data) {
         return {
           companyName: result.data["Company Name"] || companyName,
+          locationName: result.data["Location Name"] || locationName,
+          locationType: result.data["Location Type"] || locationType,
+          status: result.data["Status"] || 'active',
           address1: result.data["Address 1"] || '',
           address2: result.data["Address 2"] || '',
           city: result.data["City"] || '',
           state: result.data["State"] || '',
-          zipCode: result.data["Zip Code"] || ''
+          zipCode: result.data["Zip Code"] || '',
+          country: result.data["Country"] || country
         };
       } else {
         throw new Error('Invalid response from API');
@@ -1049,11 +1341,15 @@ const useCustomerExtractor = () => {
       // Return original data if API fails
       return {
         companyName: companyName,
+        locationName: locationName,
+        locationType: locationType,
+        status: status,
         address1: address,
         address2: '',
         city: '',
         state: '',
-        zipCode: ''
+        zipCode: '',
+        country: country
       };
     }
   };
@@ -1305,11 +1601,15 @@ const useCustomerExtractor = () => {
           if (!mapping.companyName || !row[mapping.companyName]) continue;
 
           const companyName = row[mapping.companyName];
+          const locationName = mapping.locationName ? row[mapping.locationName] || '' : '';
+          const locationType = mapping.locationType ? row[mapping.locationType] || '' : '';
+          const status = mapping.status ? row[mapping.status] || '' : '';
           const address1 = mapping.address1 ? row[mapping.address1] || '' : '';
           const address2 = mapping.address2 ? row[mapping.address2] || '' : '';
           const city = mapping.city ? row[mapping.city] || '' : '';
           const state = mapping.state ? row[mapping.state] || '' : '';
           const zipCode = mapping.zipCode ? row[mapping.zipCode] || '' : '';
+          const country = mapping.country ? row[mapping.country] || '' : '';
 
           // Skip rows without any address information
           // At least one of: address1, city, state, or zipCode must have meaningful data
@@ -1327,11 +1627,15 @@ const useCustomerExtractor = () => {
 
           allRecords.push({
             companyName: companyName.trim(),
+            locationName: locationName.trim(),
+            locationType: locationType.trim(),
+            status: status.trim(),
             address1: address1.trim(),
             address2: address2.trim(),
             city: city.trim(),
             state: state.trim(),
             zipCode: zipCode.trim(),
+            country: country.trim(),
             source: file.name,
             originalAddress: fullAddress,
             isStandardized: false
@@ -1339,12 +1643,22 @@ const useCustomerExtractor = () => {
         }
       }
 
-      // Deduplication logic
+      // Step 1: Apply near-duplicate company name detection and normalization
+      console.log('Detecting near-duplicate company names...');
+      const recordsWithNormalizedNames = findNearDuplicateCompanies(allRecords);
+      
+      // Count near duplicates found
+      const nearDuplicateCount = recordsWithNormalizedNames.filter(record => record.isNearDuplicate).length;
+      if (nearDuplicateCount > 0) {
+        showInfo(`Detected ${nearDuplicateCount} near-duplicate company names that have been normalized. Look for orange indicators in the results.`, 'Near Duplicates Found');
+      }
+      
+      // Step 2: Exact deduplication logic (now with normalized company names)
       const uniqueRecords = [];
       const duplicateGroups = new Map();
 
-      for (let i = 0; i < allRecords.length; i++) {
-        const record = allRecords[i];
+      for (let i = 0; i < recordsWithNormalizedNames.length; i++) {
+        const record = recordsWithNormalizedNames[i];
         const key = `${record.companyName.toLowerCase().trim()}_${record.address1.toLowerCase().trim()}_${record.city.toLowerCase().trim()}`;
 
         if (!duplicateGroups.has(key)) {
@@ -1361,8 +1675,8 @@ const useCustomerExtractor = () => {
           
           if (aIsPrimary !== bIsPrimary) return bIsPrimary - aIsPrimary;
           
-          const aCompleteness = [a.address1, a.address2, a.city, a.state, a.zipCode].filter(Boolean).length;
-          const bCompleteness = [b.address1, b.address2, b.city, b.state, b.zipCode].filter(Boolean).length;
+          const aCompleteness = [a.address1, a.address2, a.city, a.state, a.zipCode, a.locationName, a.locationType, a.country, a.status].filter(Boolean).length;
+          const bCompleteness = [b.address1, b.address2, b.city, b.state, b.zipCode, b.locationName, b.locationType, b.country, b.status].filter(Boolean).length;
           return bCompleteness - aCompleteness;
         });
 
@@ -1426,12 +1740,13 @@ const useCustomerExtractor = () => {
       setSelectedRecords(initialSelection);
       
       setStep(STEPS.RESULTS);
-      showSuccess(`Successfully processed ${uniqueRecords.length} records from ${files.length} file(s). Records with complete addresses have been pre-selected for export.`, 'Processing Complete');
+      const nearDuplicatesText = nearDuplicateCount > 0 ? ` ${nearDuplicateCount} near-duplicate companies were normalized.` : '';
+      showSuccess(`Successfully processed ${uniqueRecords.length} records from ${files.length} file(s).${nearDuplicatesText} Records with complete addresses have been pre-selected for export.`, 'Processing Complete');
     } catch (error) {
       console.error('Error processing files:', error);
       showError('An error occurred while processing the files. Please try again.');
     }
-  }, [files, columnMappings, primaryFileIndex, showSuccess, showError]);
+  }, [files, columnMappings, primaryFileIndex, showSuccess, showError, showInfo]);
 
   const standardizeRecords = async (indices) => {
     setIsStandardizing(true);
@@ -1451,10 +1766,14 @@ const useCustomerExtractor = () => {
         const fullAddress = fullAddressParts.join(', ');
 
         const standardized = fullAddress.trim() 
-          ? await standardizeWithGemini(record.companyName, fullAddress)
+          ? await standardizeWithGemini(record.companyName, fullAddress, record.locationName, record.locationType, record.status, record.country)
           : {
               companyName: record.companyName.replace(/\b\w/g, l => l.toUpperCase()).trim(),
-              address1: '', address2: '', city: '', state: '', zipCode: ''
+              locationName: record.locationName,
+              locationType: record.locationType,
+              status: record.status,
+              address1: '', address2: '', city: '', state: '', zipCode: '',
+              country: record.country
             };
 
         updatedData[recordIndex] = { 
@@ -1463,11 +1782,15 @@ const useCustomerExtractor = () => {
           isStandardized: true,
           originalData: {
             companyName: record.companyName,
+            locationName: record.locationName,
+            locationType: record.locationType,
+            status: record.status,
             address1: record.address1,
             address2: record.address2,
             city: record.city,
             state: record.state,
-            zipCode: record.zipCode
+            zipCode: record.zipCode,
+            country: record.country
           }
         };
       }
@@ -1603,14 +1926,18 @@ const useCustomerExtractor = () => {
         if (sortedRecords.length > 1) customerLocations.push(...sortedRecords.slice(1));
       });
 
-      const headers = ['Customer Name', 'Address 1', 'Address 2', 'City', 'State', 'Zip Code'];
+      const headers = ['Customer Name', 'Location Name', 'Location Type', 'Status', 'Address 1', 'Address 2', 'City', 'State', 'Zip Code', 'Country'];
       const formatRecord = (record) => [
         `"${record.companyName.replace(/"/g, '""')}"`,
+        `"${record.locationName.replace(/"/g, '""')}"`,
+        `"${record.locationType.replace(/"/g, '""')}"`,
+        `"${record.status.replace(/"/g, '""')}"`,
         `"${record.address1.replace(/"/g, '""')}"`,
         `"${record.address2.replace(/"/g, '""')}"`,
         `"${record.city.replace(/"/g, '""')}"`,
         `"${record.state.replace(/"/g, '""')}"`,
-        `"${record.zipCode.replace(/"/g, '""')}"`
+        `"${record.zipCode.replace(/"/g, '""')}"`,
+        `"${record.country.replace(/"/g, '""')}"`
       ].join(',');
 
       const downloadCSV = (content, filename) => {
