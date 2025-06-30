@@ -10,13 +10,10 @@ import * as XLSX from 'xlsx';
 
 const STEPS = { UPLOAD: 1, WORKSHEET_SELECTION: 1.5, MAPPING: 2, RESULTS: 3 };
 
-const FIELD_TYPES = ['companyName', 'locationName', 'locationType', 'status', 'address1', 'address2', 'city', 'state', 'zipCode', 'country'];
+const FIELD_TYPES = ['companyName', 'address1', 'address2', 'city', 'state', 'zipCode', 'country'];
 
 const FIELD_LABELS = {
   companyName: 'Company Name',
-  locationName: 'Location Name',
-  locationType: 'Location Type',
-  status: 'Status',
   address1: 'Address 1', 
   address2: 'Address 2',
   city: 'City',
@@ -1720,7 +1717,6 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
                   />
                 </th>
                 {renderColumnHeader('companyName', 'Company Name', 'min-w-[200px]')}
-                {renderColumnHeader('status', 'Status', 'min-w-[100px]')}
                 {renderColumnHeader('address1', 'Address 1', 'min-w-[200px]')}
                 {renderColumnHeader('address2', 'Address 2', 'min-w-[150px]')}
                 {renderColumnHeader('city', 'City', 'min-w-[120px]')}
@@ -1831,9 +1827,6 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
                           />
                         </div>
                       )}
-                    </td>
-                    <td className={`border border-gray-300 px-1 py-1 ${textClass}`}>
-                      {renderEditableCell(record, 'status', originalIndex)}
                     </td>
                     <td className={`border border-gray-300 px-1 py-1 ${textClass}`}>
                       {renderEditableCell(record, 'address1', originalIndex)}
@@ -2928,35 +2921,72 @@ const exportToCSV = useCallback(() => {
     });
 
     // Customer Names headers and format
-    const customerNamesHeaders = ['Customer Name', 'Customer Type(s)', 'Status', 'Address 1', 'Address 2', 'City', 'State', 'Zip Code', 'Country'];
+    const customerNamesHeaders = ['Partner', 'Customer Parent', 'Customer Name', 'Customer Type(s)', 'Exclusive Supplier(s)',	'Account Manager',	
+      'Support Solution',	'Billing Solution', 'Status', 'Name', 'Description', 'Primary Contact',	'Primary Contact Phone',	'Primary Contact Extension',	
+      'Primary Contact Email', 'Address One', 'Address Two', 'City', 'State', 'Zip Code', 'Country', 'Tax Identification Number',	
+      'Approach Date', 'Lead Source', 'Sub Agent', 'Sub Agent Percentage', 'Ownership', 'Vertical', 'Classification', 'URL', 'Count Employees', 
+      'Count Locations'];
     const formatCustomerNameRecord = (record) => [
-      `"${record.companyName.replace(/"/g, '""')}"`,
+      '""',
+      '""',
       `"Wired"`,
-      `"${record.status.replace(/"/g, '""')}"`,
+      '""',
+      '""',
+      '""',
+      '""',
+      `"Active"`,
+      `"${record.companyName.replace(/"/g, '""')}"`,
+      '""',
+      '""',
+      '""',
+      '""',
+      '""',
       `"${record.address1.replace(/"/g, '""')}"`,
       `"${record.address2.replace(/"/g, '""')}"`,
       `"${record.city.replace(/"/g, '""')}"`,
       `"${record.state.replace(/"/g, '""')}"`,
       `"${record.zipCode.replace(/"/g, '""')}"`,
-      `"${record.country.replace(/"/g, '""')}"`
-    ].join(',');
+      `"${record.country.replace(/"/g, '""')}"`,
+      '""',
+      '""',
+      '""',
+      '""',
+      '""',
+      '""',
+      '""',
+      '""',
+      '""',
+      '""',
+      '""'].join(',');
 
     // Customer Locations headers and format
-    const customerLocationsHeaders = ['Customer Name', 'Location Name', 'Location Type', 'Status', 'Address 1', 'Address 2', 'City', 'State', 'Zip Code', 'Country'];
+    const customerLocationsHeaders = ['Customer', 'Location Name', 'Location Type', 'Location Number', 'Status', 'Sub Status', 'Billing Code',
+    'Address One', 'Address Two', 'City', 'State', 'Postal Code', 'Country', 'Primary Name', 'Primary Phone', 'Primary Phone Extension', 
+    'Primary Email', 'Secondary Name', 'Secondary Phone', 'Secondary Phone Extension', 'Secondary Email'];
     const formatCustomerLocationRecord = (record) => {
       const locationName = `${record.companyName} - ${record.city} ${record.state}`;
       return [
         `"${record.companyName.replace(/"/g, '""')}"`,
         `"${locationName.replace(/"/g, '""')}"`,
         `"Branch Office"`,
-        `"${record.status.replace(/"/g, '""')}"`,
+        '""',
+        `"Active"`,
+        '""',
+        '""',
         `"${record.address1.replace(/"/g, '""')}"`,
         `"${record.address2.replace(/"/g, '""')}"`,
         `"${record.city.replace(/"/g, '""')}"`,
         `"${record.state.replace(/"/g, '""')}"`,
         `"${record.zipCode.replace(/"/g, '""')}"`,
-        `"${record.country.replace(/"/g, '""')}"`
-      ].join(',');
+        `"${record.country.replace(/"/g, '""')}"`,
+        '""',
+      '""',
+      '""',
+      '""',
+      '""',
+      '""',
+      '""',
+      '""'].join(',');
     };
 
     const downloadCSV = (content, filename) => {
