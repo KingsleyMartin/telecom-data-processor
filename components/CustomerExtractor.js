@@ -3027,6 +3027,7 @@ const exportToCSV = useCallback(() => {
       '""',
       '""',
       `"Active"`,
+      '""',
       `"${record.companyName.replace(/"/g, '""')}"`,
       '""',
       '""',
