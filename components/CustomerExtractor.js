@@ -1752,7 +1752,6 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
 
                 const originalIndex = processedData.indexOf(record);
 
-                // Determine text styling
                 // Determine text styling based on selection status
                 const isSelected = originalIndex !== -1 && selectedRecords.has(originalIndex);
                 let textClass = '';
@@ -1976,6 +1975,9 @@ const useCustomerExtractor = () => {
   const [findReplaceFieldLabel, setFindReplaceFieldLabel] = useState('');
   const [progressName, setProgressName] = useState('');
   
+  // New state for tracking original row to company mapping
+  const [originalRowToCompanyMapping, setOriginalRowToCompanyMapping] = useState(new Map());
+  
   // New workflow state
   const [workflowStep, setWorkflowStep] = useState(1); // 1: Remove Duplicates, 2: Standardize, 3: Analyze, 4: Export
   const [isRemovingDuplicates, setIsRemovingDuplicates] = useState(false);
@@ -2155,7 +2157,7 @@ const useCustomerExtractor = () => {
     }
   }, [processedData, files, primaryFileIndex, showSuccess, showError, showWarning]);
 
-  // Step 2: Standardize remaining checked records
+ // Step 2: Standardize remaining checked records
   const standardizeRemainingRecords = useCallback(async () => {
     const checkedRecords = processedData.filter((record, index) => 
       selectedRecords.has(index) && !record.isDuplicateRemoved
@@ -2171,6 +2173,8 @@ const useCustomerExtractor = () => {
     
     try {
       const updatedData = [...processedData];
+      const processedKeys = new Set(); // Track which duplicate groups we've already processed
+      let totalUpdatedRecords = 0;
       
       for (let i = 0; i < checkedRecords.length; i++) {
         const record = checkedRecords[i];
@@ -2179,6 +2183,13 @@ const useCustomerExtractor = () => {
         if (record.isDuplicateRemoved || !selectedRecords.has(originalIndex)) continue;
 
         setStandardizationProgress({ current: i + 1, total: checkedRecords.length });
+
+        // Create a key to identify duplicate records
+        const duplicateKey = `${record.companyName.toLowerCase().trim()}_${record.address1.toLowerCase().trim()}_${record.city.toLowerCase().trim()}`;
+        
+        // Skip if we've already processed this duplicate group
+        if (processedKeys.has(duplicateKey)) continue;
+        processedKeys.add(duplicateKey);
 
         const fullAddressParts = [record.address1, record.address2, record.city, record.state, record.zipCode].filter(Boolean);
         const fullAddress = fullAddressParts.join(', ');
@@ -2194,23 +2205,57 @@ const useCustomerExtractor = () => {
               country: record.country
             };
 
-        updatedData[originalIndex] = { 
-          ...record, 
-          ...standardized, 
-          isStandardized: true,
-          originalData: {
-            companyName: record.companyName,
-            locationName: record.locationName,
-            locationType: record.locationType,
-            status: record.status,
-            address1: record.address1,
-            address2: record.address2,
-            city: record.city,
-            state: record.state,
-            zipCode: record.zipCode,
-            country: record.country
+        // Find all matching duplicate records (including the current one)
+        const matchingRecords = [];
+        processedData.forEach((otherRecord, otherIndex) => {
+          const otherKey = `${otherRecord.companyName.toLowerCase().trim()}_${otherRecord.address1.toLowerCase().trim()}_${otherRecord.city.toLowerCase().trim()}`;
+          if (otherKey === duplicateKey) {
+            matchingRecords.push({ record: otherRecord, index: otherIndex });
           }
-        };
+        });
+
+        // Apply standardization to all matching records and update the mapping
+        matchingRecords.forEach(({ record: matchRecord, index: matchIndex }) => {
+          const updatedRecord = { 
+            ...matchRecord, 
+            ...standardized, 
+            isStandardized: true,
+            originalData: {
+              companyName: matchRecord.companyName,
+              locationName: matchRecord.locationName,
+              locationType: matchRecord.locationType,
+              status: matchRecord.status,
+              address1: matchRecord.address1,
+              address2: matchRecord.address2,
+              city: matchRecord.city,
+              state: matchRecord.state,
+              zipCode: matchRecord.zipCode,
+              country: matchRecord.country
+            }
+          };
+          
+          updatedData[matchIndex] = updatedRecord;
+
+          // Update the mapping for this processed record to point to the standardized data
+          if (matchRecord.originalFileIndex !== undefined && matchRecord.originalRowIndex !== undefined) {
+            const mappingKey = `${matchRecord.originalFileIndex}-${matchRecord.originalRowIndex}`;
+            setOriginalRowToCompanyMapping(prev => {
+              const updated = new Map(prev);
+              updated.set(mappingKey, {
+                companyName: standardized.companyName,
+                address1: standardized.address1,
+                address2: standardized.address2,
+                city: standardized.city,
+                state: standardized.state,
+                zipCode: standardized.zipCode,
+                country: standardized.country
+              });
+              return updated;
+            });
+          }
+        });
+
+        totalUpdatedRecords += matchingRecords.length;
       }
 
       setProcessedData(updatedData);
@@ -2218,7 +2263,7 @@ const useCustomerExtractor = () => {
       const standardizedCount = checkedRecords.length;
       
       showSuccess(
-        `Standardization complete! Processed ${standardizedCount} checked record${standardizedCount !== 1 ? 's' : ''}. Ready for analysis to identify additional issues.`,
+        `Standardization complete! Processed ${standardizedCount} checked record${standardizedCount !== 1 ? 's' : ''} and updated ${totalUpdatedRecords} total record${totalUpdatedRecords !== 1 ? 's' : ''} (including duplicates). Ready for analysis to identify additional issues.`,
         'Standardization Complete'
       );
       
@@ -2511,7 +2556,7 @@ const useCustomerExtractor = () => {
     }
   }, [showSuccess, showError, showInfo]);
 
-  // Other handler functions would go here...
+  // Other handler functions
   const handleWorksheetSelection = useCallback((fileIndex, worksheetIndex) => {
     setFilesWithWorksheets(prev => {
       const updated = [...prev];
@@ -2568,6 +2613,7 @@ const useCustomerExtractor = () => {
   const processFiles = useCallback(async () => {
     try {
       const allRecords = [];
+      const rowMapping = new Map(); // Track original file/row to processed record mapping
       const primaryFile = files[primaryFileIndex];
       const otherFiles = files.filter((_, index) => index !== primaryFileIndex);
       const orderedFiles = [primaryFile, ...otherFiles];
@@ -2576,7 +2622,8 @@ const useCustomerExtractor = () => {
         const fileIndex = files.indexOf(file);
         const mapping = columnMappings[fileIndex];
 
-        for (const row of file.data) {
+        for (let rowIndex = 0; rowIndex < file.data.length; rowIndex++) {
+          const row = file.data[rowIndex];
           if (!mapping.companyName || !row[mapping.companyName]) continue;
 
           const companyName = row[mapping.companyName];
@@ -2602,7 +2649,7 @@ const useCustomerExtractor = () => {
           const fullAddressParts = [address1, address2, city, state, zipCode].filter(Boolean);
           const fullAddress = fullAddressParts.join(', ');
 
-          allRecords.push({
+          const processedRecord = {
             companyName: companyName.trim(),
             locationName: locationName.trim(),
             locationType: locationType.trim(),
@@ -2615,9 +2662,25 @@ const useCustomerExtractor = () => {
             country: country.trim(),
             source: file.name,
             originalAddress: fullAddress,
+            originalFileIndex: fileIndex,
+            originalRowIndex: rowIndex,
             isStandardized: false,
             hasAnalysisIssues: false,
             analysisIssues: []
+          };
+
+          allRecords.push(processedRecord);
+
+          // Store the mapping from original file/row to the initial company data
+          const mappingKey = `${fileIndex}-${rowIndex}`;
+          rowMapping.set(mappingKey, {
+            companyName: companyName.trim(),
+            address1: address1.trim(),
+            address2: address2.trim(),
+            city: city.trim(),
+            state: state.trim(),
+            zipCode: zipCode.trim(),
+            country: country.trim()
           });
         }
       }
@@ -2705,6 +2768,7 @@ const useCustomerExtractor = () => {
       });
 
       setProcessedData(uniqueRecords);
+      setOriginalRowToCompanyMapping(rowMapping);
       
       // Reset workflow to step 1 for new data
       setWorkflowStep(1);
@@ -2770,6 +2834,24 @@ const useCustomerExtractor = () => {
             country: record.country
           }
         };
+
+        // Update the mapping for this record
+        if (record.originalFileIndex !== undefined && record.originalRowIndex !== undefined) {
+          const mappingKey = `${record.originalFileIndex}-${record.originalRowIndex}`;
+          setOriginalRowToCompanyMapping(prev => {
+            const updated = new Map(prev);
+            updated.set(mappingKey, {
+              companyName: standardized.companyName,
+              address1: standardized.address1,
+              address2: standardized.address2,
+              city: standardized.city,
+              state: standardized.state,
+              zipCode: standardized.zipCode,
+              country: standardized.country
+            });
+            return updated;
+          });
+        }
       }
 
       setProcessedData(updatedData);
@@ -2894,7 +2976,7 @@ const useCustomerExtractor = () => {
     }
   }, [findReplaceFieldLabel, showSuccess, showError]);
 
-  // Export to CSV functionality
+  // Export to CSV functionality with Orders and Commissions
 const exportToCSV = useCallback(() => {
   try {
     const selectedData = processedData.filter((record, index) => selectedRecords.has(index));
@@ -2999,6 +3081,7 @@ const exportToCSV = useCallback(() => {
       '""'].join(',');
     };
 
+    // Helper function to download CSV
     const downloadCSV = (content, filename) => {
       const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -3011,6 +3094,7 @@ const exportToCSV = useCallback(() => {
       URL.revokeObjectURL(url);
     };
 
+    // Create and download Customer Names and Locations files
     const customerNamesContent = [customerNamesHeaders.join(','), ...customerNames.map(formatCustomerNameRecord)].join('\n');
     const customerLocationsContent = [customerLocationsHeaders.join(','), ...customerLocations.map(formatCustomerLocationRecord)].join('\n');
 
@@ -3019,15 +3103,103 @@ const exportToCSV = useCallback(() => {
       downloadCSV(customerLocationsContent, 'Customer Locations.csv');
     }
 
-    showSuccess(
-      `Downloaded ${customerNames.length} customer names${customerLocations.length > 0 ? ` and ${customerLocations.length} additional locations` : ''}.`,
-      'Export Complete'
-    );
+    // Create Orders and Commissions files with appended company data
+    let ordersCount = 0;
+    let commissionsCount = 0;
+
+    files.forEach((file, fileIndex) => {
+      const isOrdersFile = file.name.toLowerCase().includes('order');
+      const isCommissionsFile = file.name.toLowerCase().includes('commission');
+      
+      if (!isOrdersFile && !isCommissionsFile) return;
+
+      // Get the updated company data for each row
+      const enhancedRows = file.data.map((originalRow, rowIndex) => {
+        const mappingKey = `${fileIndex}-${rowIndex}`;
+        const companyData = originalRowToCompanyMapping.get(mappingKey);
+        
+        if (companyData) {
+          // Append company data to original row
+          return {
+            ...originalRow,
+            'Company Name': companyData.companyName,
+            'Address 1': companyData.address1,
+            'Address 2': companyData.address2,
+            'City': companyData.city,
+            'State': companyData.state,
+            'Zip Code': companyData.zipCode,
+            'Country': companyData.country
+          };
+        } else {
+          // No company data found, append empty company fields
+          return {
+            ...originalRow,
+            'Company Name': '',
+            'Address 1': '',
+            'Address 2': '',
+            'City': '',
+            'State': '',
+            'Zip Code': '',
+            'Country': ''
+          };
+        }
+      });
+
+      // Create headers including the new company fields
+      const enhancedHeaders = [
+        ...file.headers,
+        'Company Name',
+        'Address 1',
+        'Address 2',
+        'City',
+        'State',
+        'Zip Code',
+        'Country'
+      ];
+
+      // Format rows for CSV
+      const csvRows = enhancedRows.map(row => {
+        return enhancedHeaders.map(header => {
+          const value = row[header] || '';
+          return `"${String(value).replace(/"/g, '""')}"`;
+        }).join(',');
+      });
+
+      // Create CSV content
+      const csvContent = [
+        enhancedHeaders.join(','),
+        ...csvRows
+      ].join('\n');
+
+      // Download the file
+      if (isOrdersFile) {
+        downloadCSV(csvContent, 'Orders.csv');
+        ordersCount = enhancedRows.length;
+      } else if (isCommissionsFile) {
+        downloadCSV(csvContent, 'Commissions.csv');
+        commissionsCount = enhancedRows.length;
+      }
+    });
+
+    // Show success message
+    let exportMessage = `Downloaded ${customerNames.length} customer names`;
+    if (customerLocations.length > 0) {
+      exportMessage += ` and ${customerLocations.length} additional locations`;
+    }
+    if (ordersCount > 0) {
+      exportMessage += `, ${ordersCount} orders with company data`;
+    }
+    if (commissionsCount > 0) {
+      exportMessage += `, ${commissionsCount} commissions with company data`;
+    }
+    exportMessage += '.';
+
+    showSuccess(exportMessage, 'Export Complete');
   } catch (error) {
     console.error('Error exporting data:', error);
     showError('An error occurred while exporting the data. Please try again.');
   }
-}, [processedData, selectedRecords, showMissingAddresses, showDuplicates, showSuccess, showError]);
+}, [processedData, selectedRecords, showMissingAddresses, showDuplicates, files, originalRowToCompanyMapping, showSuccess, showError]);
 
   const resetAll = useCallback(() => {
     setStep(STEPS.UPLOAD);
@@ -3056,6 +3228,7 @@ const exportToCSV = useCallback(() => {
     setShowFindReplaceModal(false);
     setFindReplaceField(null);
     setFindReplaceFieldLabel('');
+    setOriginalRowToCompanyMapping(new Map());
     showInfo('Application has been reset. You can now upload new files.', 'Reset Complete');
   }, [showInfo]);
 
@@ -3093,6 +3266,7 @@ const exportToCSV = useCallback(() => {
         })),
         primaryFileIndex: primaryFileIndex,
         columnMappings: columnMappings,
+        originalRowToCompanyMapping: Array.from(originalRowToCompanyMapping.entries()),
         stats: {
           totalRecords: processedData.length,
           selectedCount: selectedRecords.size,
@@ -3120,7 +3294,7 @@ const exportToCSV = useCallback(() => {
       console.error('Error exporting progress:', error);
       showError('An error occurred while saving progress. Please try again.');
     }
-  }, [progressName, processedData, selectedRecords, showMissingAddresses, showDuplicates, showReviewOnly, workflowStep, files, primaryFileIndex, columnMappings, showSuccess, showError, showWarning]);
+  }, [progressName, processedData, selectedRecords, showMissingAddresses, showDuplicates, showReviewOnly, workflowStep, files, primaryFileIndex, columnMappings, originalRowToCompanyMapping, showSuccess, showError, showWarning]);
 
   const importProgress = useCallback(async (event) => {
     const file = event.target.files?.[0];
@@ -3157,6 +3331,10 @@ const exportToCSV = useCallback(() => {
       
       if (progressData.columnMappings) {
         setColumnMappings(progressData.columnMappings);
+      }
+
+      if (progressData.originalRowToCompanyMapping) {
+        setOriginalRowToCompanyMapping(new Map(progressData.originalRowToCompanyMapping));
       }
 
       setStep(STEPS.RESULTS);

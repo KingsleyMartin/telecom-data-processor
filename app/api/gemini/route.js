@@ -28,9 +28,9 @@ export async function POST(request) {
     1. Address Standardization:
     -- If the field contains the entire address including street: Break the single-line address into separate fields: "Address 1", "Address 2", "City", "State", and "Zip Code".
     -- If the field contains city, state, and zip code: Break it into "City", "State", and "Zip Code".
-    -- Identify and place any suite, unit, apartment, building, or floor information into the "Address 2" field. Remove information in Address 2 if it is the same as Address 1.
+    -- Identify and place any suite, unit, apartment, building, room, or floor information into the "Address 2" field. Remove information in Address 2 if it is the same as Address 1.
     -- Convert all fields to proper title case (first letter of each word capitalized), except for the State which should be a 2-letter uppercase code.
-    -- Standardize street suffixes (St -> Street, Ave -> Avenue, Rd -> Road, Dr -> Drive, Blvd -> Boulevard, Ln -> Lane, Ct -> Court).
+    -- Standardize street suffixes (St -> Street, Ave -> Avenue, Rd -> Road, Dr -> Drive, Blvd -> Boulevard, Ln -> Lane, Ct -> Court, Ste -> Suite).
     -- Clean and format city names properly.
     -- Keep the zip code as-is but remove any invalid characters (except for dashes).
     -- Ensure the country is set to "US" for US addresses, or use the appropriate country code for international addresses.
