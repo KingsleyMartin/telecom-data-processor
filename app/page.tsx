@@ -1,10 +1,10 @@
-import ServiceMapping from '@/components/ServiceMapping';
+import CustomerExtractor from '@/components/CustomerExtractor';
 
 export default function Home() {
   return (
     <main className="container mx-auto">
       <div className="space-y-8 py-8">
-        <ServiceMapping />
+        <CustomerExtractor />
       </div>
     </main>
   );
