@@ -2391,7 +2391,7 @@ const useCustomerExtractor = () => {
     [filteredData, processedData, selectedRecords]
   );
 
-  // Workflow button states
+  // Update the workflowButtons logic in useCustomerExtractor
   const workflowButtons = useMemo(() => {
     const totalRecords = processedData.length;
     const checkedRecords = processedData.filter((record, index) => selectedRecords.has(index)).length;
@@ -2407,8 +2407,11 @@ const useCustomerExtractor = () => {
         loading: isRemovingDuplicates
       },
       standardize: {
-        enabled: checkedRecords > 0 && workflowStep === 2,
-        label: `Standardize Records (${checkedRecords} checked)`,
+        // Modified to stay enabled after step 2
+        enabled: checkedRecords > 0 && workflowStep >= 2,
+        label: workflowStep === 2 
+          ? `Standardize Records (${checkedRecords} checked)`
+          : `Re-Standardize Records (${checkedRecords} selected)`,
         loading: isStandardizing
       },
       analyze: {
@@ -2422,7 +2425,14 @@ const useCustomerExtractor = () => {
         loading: false
       }
     };
-  }, [processedData, selectedRecords, workflowStep, isRemovingDuplicates, isStandardizing, isAnalyzing]);
+  }, [
+    processedData, 
+    selectedRecords, 
+    workflowStep, 
+    isRemovingDuplicates, 
+    isStandardizing, 
+    isAnalyzing
+  ]);
 
   // File upload handler
   const handleFileUpload = useCallback(async (event) => {
