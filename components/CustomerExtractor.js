@@ -1,4 +1,5 @@
 "use client";
+import { supabase } from '@/lib/supabase'
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { FileText, Upload, Download, Settings, Eye, EyeOff, Edit3, X, CheckCircle, AlertCircle, Info, AlertTriangle, Search, Zap, Filter } from 'lucide-react';
@@ -14,7 +15,7 @@ const FIELD_TYPES = ['companyName', 'address1', 'address2', 'city', 'state', 'zi
 
 const FIELD_LABELS = {
   companyName: 'Company Name',
-  address1: 'Address 1', 
+  address1: 'Address 1',
   address2: 'Address 2',
   city: 'City',
   state: 'State',
@@ -30,10 +31,10 @@ const FIELD_LABELS = {
 const StringUtils = {
   levenshteinDistance: (str1, str2) => {
     const matrix = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null));
-    
+
     for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
     for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
-    
+
     for (let j = 1; j <= str2.length; j++) {
       for (let i = 1; i <= str1.length; i++) {
         const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
@@ -44,23 +45,23 @@ const StringUtils = {
         );
       }
     }
-    
+
     return matrix[str2.length][str1.length];
   },
 
   jaccardSimilarity: (str1, str2) => {
     const words1 = new Set(str1.toLowerCase().split(/\s+/).filter(word => word.length > 0));
     const words2 = new Set(str2.toLowerCase().split(/\s+/).filter(word => word.length > 0));
-    
+
     const intersection = new Set([...words1].filter(word => words2.has(word)));
     const union = new Set([...words1, ...words2]);
-    
+
     return union.size > 0 ? intersection.size / union.size : 0;
   },
 
   fuzzyWordMatch: (word1, word2) => {
     if (word1 === word2) return 1;
-    
+
     const normalizeWord = (word) => {
       const abbrevMap = {
         'inc': 'incorporated', 'corp': 'corporation', 'co': 'company',
@@ -70,22 +71,22 @@ const StringUtils = {
         'mgmt': 'management', 'dev': 'development', 'mfg': 'manufacturing',
         'dist': 'distribution', 'equip': 'equipment'
       };
-      
+
       const normalized = word.toLowerCase().replace(/[^\w]/g, '');
       return abbrevMap[normalized] || normalized;
     };
-    
+
     const norm1 = normalizeWord(word1);
     const norm2 = normalizeWord(word2);
-    
+
     if (norm1 === norm2) return 0.9;
-    
+
     if (norm1.includes(norm2) || norm2.includes(norm1)) {
       const minLen = Math.min(norm1.length, norm2.length);
       const maxLen = Math.max(norm1.length, norm2.length);
       return minLen / maxLen * 0.8;
     }
-    
+
     const distance = StringUtils.levenshteinDistance(norm1, norm2);
     const maxLength = Math.max(norm1.length, norm2.length);
     return maxLength > 0 ? Math.max(0, 1 - distance / maxLength) : 0;
@@ -94,16 +95,16 @@ const StringUtils = {
   enhancedJaccardSimilarity: (str1, str2) => {
     const words1 = str1.toLowerCase().split(/\s+/).filter(word => word.length > 0);
     const words2 = str2.toLowerCase().split(/\s+/).filter(word => word.length > 0);
-    
+
     let matchScore = 0;
     let totalWords = Math.max(words1.length, words2.length);
-    
+
     const used2 = new Set();
-    
+
     for (const word1 of words1) {
       let bestMatch = 0;
       let bestIndex = -1;
-      
+
       for (let i = 0; i < words2.length; i++) {
         if (used2.has(i)) continue;
         const similarity = StringUtils.fuzzyWordMatch(word1, words2[i]);
@@ -112,13 +113,13 @@ const StringUtils = {
           bestIndex = i;
         }
       }
-      
+
       if (bestIndex !== -1) {
         matchScore += bestMatch;
         used2.add(bestIndex);
       }
     }
-    
+
     return totalWords > 0 ? matchScore / totalWords : 0;
   },
 
@@ -129,15 +130,15 @@ const StringUtils = {
 
   calculateCompanySimilarity: (name1, name2) => {
     if (name1.toLowerCase() === name2.toLowerCase()) return 1;
-    
+
     const norm1 = StringUtils.normalizeCompanyName(name1);
     const norm2 = StringUtils.normalizeCompanyName(name2);
-    
+
     const jaccard = StringUtils.jaccardSimilarity(norm1, norm2);
     const enhancedJaccard = StringUtils.enhancedJaccardSimilarity(norm1, norm2);
-    const levenshtein = 1 - StringUtils.levenshteinDistance(norm1.toLowerCase(), norm2.toLowerCase()) / 
-                      Math.max(norm1.length, norm2.length);
-    
+    const levenshtein = 1 - StringUtils.levenshteinDistance(norm1.toLowerCase(), norm2.toLowerCase()) /
+      Math.max(norm1.length, norm2.length);
+
     return (enhancedJaccard * 0.6) + (jaccard * 0.25) + (levenshtein * 0.15);
   }
 };
@@ -186,16 +187,16 @@ const FileUtils = {
   ensureUniqueHeaders: (rawHeaders) => {
     const headers = [];
     const seenHeaders = new Set();
-    
+
     rawHeaders.forEach((header) => {
       let uniqueHeader = header;
       let counter = 1;
-      
+
       while (seenHeaders.has(uniqueHeader)) {
         uniqueHeader = `${header} (${counter})`;
         counter++;
       }
-      
+
       seenHeaders.add(uniqueHeader);
       headers.push(uniqueHeader);
     });
@@ -206,7 +207,7 @@ const FileUtils = {
   parseExcel: (fileBuffer) => {
     try {
       const workbook = XLSX.read(fileBuffer, { type: 'array' });
-      
+
       if (workbook.SheetNames.length === 1) {
         return FileUtils.parseExcelSingleWorksheet(workbook);
       } else {
@@ -244,7 +245,7 @@ const FileUtils = {
     const worksheets = workbook.SheetNames.map(sheetName => {
       const worksheet = workbook.Sheets[sheetName];
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-      
+
       if (jsonData.length === 0) {
         return {
           name: sheetName,
@@ -257,9 +258,9 @@ const FileUtils = {
 
       const headers = jsonData[0] ? jsonData[0].map(h => String(h || '').trim()).filter(Boolean) : [];
       const dataRows = jsonData.slice(1).filter(row => row.some(cell => cell !== undefined && cell !== ''));
-      
+
       let score = FileUtils.calculateWorksheetScore(headers, dataRows);
-      
+
       return {
         name: sheetName,
         rowCount: dataRows.length,
@@ -282,7 +283,7 @@ const FileUtils = {
 
   calculateWorksheetScore: (headers, dataRows) => {
     let score = 0;
-    
+
     const relevantKeywords = ['company', 'customer', 'business', 'organization', 'client', 'address', 'city', 'state', 'zip', 'location', 'type', 'status', 'country'];
     headers.forEach(header => {
       const lowerHeader = header.toLowerCase();
@@ -292,16 +293,16 @@ const FileUtils = {
         }
       });
     });
-    
+
     score += Math.min(dataRows.length, 100);
     score += Math.min(headers.length, 20);
-    
+
     const hasCompany = headers.some(h => ['company', 'customer', 'business', 'organization', 'client'].some(k => h.toLowerCase().includes(k)));
     const hasAddress = headers.some(h => ['address', 'city', 'state', 'zip'].some(k => h.toLowerCase().includes(k)));
     if (hasCompany && hasAddress) {
       score += 50;
     }
-    
+
     return score;
   },
 
@@ -339,64 +340,64 @@ const FileUtils = {
 const DataUtils = {
   detectColumnMappings: (headers) => {
     const mapping = {};
-    
+
     const fieldMatchers = {
       companyName: (header) => {
         const lower = header.toLowerCase();
-        return ['customer', 'company', 'business', 'organization', 'client'].some(keyword => 
+        return ['customer', 'company', 'business', 'organization', 'client'].some(keyword =>
           lower.includes(keyword) && !lower.includes('id') && !lower.includes('contact') && !lower.includes('account')
         );
       },
       locationName: (header) => {
         const lower = header.toLowerCase();
-        return ['location name', 'site name', 'facility name', 'branch name'].some(keyword => 
+        return ['location name', 'site name', 'facility name', 'branch name'].some(keyword =>
           lower.includes(keyword)
         ) || (lower.includes('location') && lower.includes('name'));
       },
       locationType: (header) => {
         const lower = header.toLowerCase();
-        return ['location type', 'site type', 'facility type', 'branch type'].some(keyword => 
+        return ['location type', 'site type', 'facility type', 'branch type'].some(keyword =>
           lower.includes(keyword)
         ) || (lower.includes('location') && lower.includes('type'));
       },
       status: (header) => {
         const lower = header.toLowerCase();
-        return ['status', 'state', 'condition'].some(keyword => 
+        return ['status', 'state', 'condition'].some(keyword =>
           lower === keyword || (lower.includes(keyword) && !lower.includes('account'))
         );
       },
       address1: (header) => {
         const lower = header.toLowerCase();
-        return lower === 'address 1' || 
-               (lower.includes('address') && lower.includes('1') && 
-                !lower.includes('account') && !lower.includes('('));
+        return lower === 'address 1' ||
+          (lower.includes('address') && lower.includes('1') &&
+            !lower.includes('account') && !lower.includes('('));
       },
       address2: (header) => {
         const lower = header.toLowerCase();
-        return lower === 'address 2' || lower === ' address 2' || 
-               (lower.includes('address') && lower.includes('2') && 
-                !lower.includes('account') && !lower.includes('('));
+        return lower === 'address 2' || lower === ' address 2' ||
+          (lower.includes('address') && lower.includes('2') &&
+            !lower.includes('account') && !lower.includes('('));
       },
       city: (header) => {
         const lower = header.toLowerCase();
-        return lower === 'city' || 
-               (lower.includes('city') && !lower.includes('account') && 
-                !lower.includes(',') && !lower.includes('('));
+        return lower === 'city' ||
+          (lower.includes('city') && !lower.includes('account') &&
+            !lower.includes(',') && !lower.includes('('));
       },
       state: (header) => {
         const lower = header.toLowerCase();
-        return lower === 'state' || 
-               (lower.includes('state') && !lower.includes('account') && 
-                !lower.includes(',') && !lower.includes('('));
+        return lower === 'state' ||
+          (lower.includes('state') && !lower.includes('account') &&
+            !lower.includes(',') && !lower.includes('('));
       },
       zipCode: (header) => {
         const lower = header.toLowerCase();
         return lower === 'postal code' || lower === 'zip code' || lower === 'zipcode' || lower === 'zip' ||
-               (lower.includes('postal') && !lower.includes('account') && !lower.includes('('));
+          (lower.includes('postal') && !lower.includes('account') && !lower.includes('('));
       },
       country: (header) => {
         const lower = header.toLowerCase();
-        return ['country', 'nation'].some(keyword => 
+        return ['country', 'nation'].some(keyword =>
           lower.includes(keyword) && !lower.includes('account')
         );
       }
@@ -416,7 +417,7 @@ const DataUtils = {
 
   findNearDuplicateCompanies: (records, files, primaryFileIndex) => {
     const companyGroups = new Map();
-    
+
     records.forEach((record, index) => {
       const companyKey = record.companyName.toLowerCase().trim();
       if (!companyGroups.has(companyKey)) {
@@ -424,49 +425,49 @@ const DataUtils = {
       }
       companyGroups.get(companyKey).push({ ...record, originalIndex: index });
     });
-    
+
     const uniqueCompanies = Array.from(companyGroups.keys()).sort();
     const nearDuplicateGroups = [];
     const processed = new Set();
-    
+
     for (let i = 0; i < uniqueCompanies.length; i++) {
       if (processed.has(uniqueCompanies[i])) continue;
-      
+
       const currentGroup = [uniqueCompanies[i]];
       processed.add(uniqueCompanies[i]);
-      
+
       for (let j = i + 1; j < Math.min(i + 10, uniqueCompanies.length); j++) {
         if (processed.has(uniqueCompanies[j])) continue;
-        
+
         const similarity = StringUtils.calculateCompanySimilarity(uniqueCompanies[i], uniqueCompanies[j]);
-        
+
         if (similarity >= 0.75) {
           currentGroup.push(uniqueCompanies[j]);
           processed.add(uniqueCompanies[j]);
         }
       }
-      
+
       if (currentGroup.length > 1) {
         nearDuplicateGroups.push(currentGroup);
       }
     }
-    
+
     const updatedRecords = [...records];
-    
+
     nearDuplicateGroups.forEach(group => {
       const canonical = group.reduce((best, current) => {
         const currentRecords = companyGroups.get(current);
         const bestRecords = companyGroups.get(best);
-        
+
         const currentFromPrimary = currentRecords.some(r => r.source === files[primaryFileIndex]?.name);
         const bestFromPrimary = bestRecords.some(r => r.source === files[primaryFileIndex]?.name);
-        
+
         if (currentFromPrimary && !bestFromPrimary) return current;
         if (!currentFromPrimary && bestFromPrimary) return best;
-        
+
         return current.length > best.length ? current : best;
       });
-      
+
       group.forEach(companyName => {
         if (companyName !== canonical) {
           const recordsToUpdate = companyGroups.get(companyName);
@@ -481,7 +482,7 @@ const DataUtils = {
         }
       });
     });
-    
+
     return updatedRecords;
   },
 
@@ -492,19 +493,19 @@ const DataUtils = {
     if (!record.address1 || record.address1.trim().length < 3) {
       issues.push('Missing or incomplete address');
     }
-    
+
     if (!record.city || record.city.trim().length < 2) {
       issues.push('Missing or incomplete city');
     }
-    
+
     if (!record.state || record.state.trim().length < 2) {
       issues.push('Missing or incomplete state');
     }
-    
+
     if (!record.zipCode || record.zipCode.trim().length < 5) {
       issues.push('Missing or incomplete zip code');
     }
-    
+
     // Check for potential incomplete zip codes (less than 5 digits)
     if (record.zipCode && record.zipCode.trim().length > 0 && record.zipCode.trim().length < 5) {
       issues.push('Incomplete zip code');
@@ -541,7 +542,7 @@ const useSnackbar = () => {
   const addNotification = useCallback((notification) => {
     const id = Date.now() + Math.random();
     const newNotification = { id, ...notification };
-    
+
     setNotifications(prev => [...prev, newNotification]);
 
     // Auto-remove after duration (default 5 seconds)
@@ -656,9 +657,8 @@ const StepIndicator = ({ currentStep }) => {
       <div className="flex items-center justify-between">
         {displaySteps.map((stepNumber, index) => (
           <div key={stepNumber} className={`flex items-center ${index < displaySteps.length - 1 ? 'flex-1' : ''}`}>
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-              currentStep >= stepNumber ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-600'
-            }`}>
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${currentStep >= stepNumber ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-600'
+              }`}>
               {stepNumber === 1.5 ? '📊' : Math.floor(stepNumber)}
             </div>
             <span className={`ml-2 text-sm ${currentStep >= stepNumber ? 'text-blue-600' : 'text-gray-500'}`}>
@@ -755,29 +755,25 @@ const FileUploadStep = ({ onFileUpload, onImportProgress }) => {
 
   return (
     <div className="space-y-6">
-      <div 
-        className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
-          isDragging 
-            ? 'border-blue-500 bg-blue-50 border-solid' 
-            : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
-        }`}
+      <div
+        className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${isDragging
+          ? 'border-blue-500 bg-blue-50 border-solid'
+          : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
+          }`}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        <Upload className={`mx-auto h-12 w-12 mb-4 transition-colors ${
-          isDragging ? 'text-blue-500' : 'text-gray-400'
-        }`} />
-        <div className={`text-lg font-medium mb-2 transition-colors ${
-          isDragging ? 'text-blue-700' : 'text-gray-700'
-        }`}>
+        <Upload className={`mx-auto h-12 w-12 mb-4 transition-colors ${isDragging ? 'text-blue-500' : 'text-gray-400'
+          }`} />
+        <div className={`text-lg font-medium mb-2 transition-colors ${isDragging ? 'text-blue-700' : 'text-gray-700'
+          }`}>
           {isDragging ? 'Drop files here to upload' : 'Upload CSV or Excel Files'}
         </div>
-        <div className={`text-gray-500 mb-4 ${
-          isDragging ? 'text-blue-600' : 'text-gray-500'
-        }`}>
-          {isDragging 
+        <div className={`text-gray-500 mb-4 ${isDragging ? 'text-blue-600' : 'text-gray-500'
+          }`}>
+          {isDragging
             ? 'Release to upload your files'
             : 'Drag and drop files here, or click to select files'
           }
@@ -795,11 +791,10 @@ const FileUploadStep = ({ onFileUpload, onImportProgress }) => {
         />
         <label
           htmlFor="file-upload"
-          className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md cursor-pointer transition-colors ${
-            isDragging 
-              ? 'text-blue-700 bg-blue-100 hover:bg-blue-200' 
-              : 'text-white bg-blue-600 hover:bg-blue-700'
-          }`}
+          className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md cursor-pointer transition-colors ${isDragging
+            ? 'text-blue-700 bg-blue-100 hover:bg-blue-200'
+            : 'text-white bg-blue-600 hover:bg-blue-700'
+            }`}
         >
           Choose Files
         </label>
@@ -858,7 +853,7 @@ const WorksheetSelectionStep = ({ filesWithWorksheets, onWorksheetSelection, onC
         {filesWithWorksheets.map((file, fileIndex) => (
           <div key={fileIndex} className="border rounded-lg p-4">
             <h3 className="font-medium text-gray-800 mb-4">{file.name}</h3>
-            
+
             <div className="space-y-3">
               {file.worksheets.map((worksheet, worksheetIndex) => (
                 <label key={worksheetIndex} className="flex items-start gap-3 cursor-pointer p-3 border rounded-md hover:bg-gray-50">
@@ -939,11 +934,10 @@ const ColumnMappingStep = ({ files, columnMappings, primaryFileIndex, mappingNam
               <button
                 onClick={onExportMapping}
                 disabled={!mappingName.trim()}
-                className={`px-4 py-2 rounded-md border flex items-center gap-2 ${
-                  !mappingName.trim()
-                    ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
-                    : 'bg-green-600 text-white border-green-600 hover:bg-green-700'
-                }`}
+                className={`px-4 py-2 rounded-md border flex items-center gap-2 ${!mappingName.trim()
+                  ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
+                  : 'bg-green-600 text-white border-green-600 hover:bg-green-700'
+                  }`}
               >
                 <Download size={16} />
                 Save
@@ -1074,7 +1068,7 @@ const OriginalDataModal = ({ isOpen, record, onClose }) => {
             ×
           </button>
         </div>
-        
+
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-6">
             <div>
@@ -1085,7 +1079,7 @@ const OriginalDataModal = ({ isOpen, record, onClose }) => {
                 ))}
               </div>
             </div>
-            
+
             <div>
               <h3 className="font-medium text-gray-700 mb-3 text-center">Standardized Data</h3>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-2">
@@ -1095,7 +1089,7 @@ const OriginalDataModal = ({ isOpen, record, onClose }) => {
               </div>
             </div>
           </div>
-          
+
           <div className="flex justify-end pt-4">
             <button
               onClick={onClose}
@@ -1128,7 +1122,7 @@ const NearDuplicateModal = ({ isOpen, record, onClose }) => {
             ×
           </button>
         </div>
-        
+
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-6">
             <div>
@@ -1144,7 +1138,7 @@ const NearDuplicateModal = ({ isOpen, record, onClose }) => {
                 </div>
               </div>
             </div>
-            
+
             <div>
               <h3 className="font-medium text-gray-700 mb-3 text-center">Normalized Company Name</h3>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4">
@@ -1169,7 +1163,7 @@ const NearDuplicateModal = ({ isOpen, record, onClose }) => {
               {record.status && <div><strong>Status:</strong> {record.status}</div>}
             </div>
           </div>
-          
+
           <div className="flex justify-end pt-4">
             <button
               onClick={onClose}
@@ -1281,7 +1275,7 @@ const FindReplaceModal = ({ isOpen, field, fieldLabel, data, onClose, onReplace 
             ×
           </button>
         </div>
-        
+
         <div className="space-y-6">
           {/* Find and Replace Inputs */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1387,11 +1381,10 @@ const FindReplaceModal = ({ isOpen, field, fieldLabel, data, onClose, onReplace 
             <button
               onClick={handleReplace}
               disabled={previewChanges.length === 0}
-              className={`px-4 py-2 rounded-md ${
-                previewChanges.length === 0
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-blue-600 text-white hover:bg-blue-700'
-              }`}
+              className={`px-4 py-2 rounded-md ${previewChanges.length === 0
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
             >
               Replace All ({previewChanges.length})
             </button>
@@ -1403,9 +1396,9 @@ const FindReplaceModal = ({ isOpen, field, fieldLabel, data, onClose, onReplace 
 };
 
 // Results Step Component
-const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCount, showMissingAddresses, showDuplicates, showReviewOnly, editingCell, isStandardizing, isAnalyzing, files, primaryFileIndex, progressName, workflowButtons, workflowStep, onToggleRecordSelection, onToggleSelectAll, onCellEdit, onCellClick, onCellBlur, onToggleMissingAddresses, onToggleDuplicates, onToggleReviewFilter, onAnalyzeRecords, onRemoveDuplicates, onStandardizeRemaining, onExport, onReset, onViewOriginalData, onViewNearDuplicateData, onOpenFindReplace, onSetProgressName, onExportProgress, onImportProgress }) => {
+const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCount, showMissingAddresses, showDuplicates, showReviewOnly, editingCell, isStandardizing, isAnalyzing, files, primaryFileIndex, progressName, workflowButtons, workflowStep, onToggleRecordSelection, onToggleSelectAll, onCellEdit, onCellClick, onCellBlur, onToggleMissingAddresses, onToggleDuplicates, onToggleReviewFilter, onAnalyzeRecords, onRemoveDuplicates, onStandardizeRemaining, importToSupabase, onReset, onViewOriginalData, onViewNearDuplicateData, onOpenFindReplace, onSetProgressName, onExportProgress, onImportProgress }) => {
   const selectableFilteredData = filteredData.filter(record => processedData.indexOf(record) !== -1);
-  const allVisibleSelected = selectableFilteredData.length > 0 && 
+  const allVisibleSelected = selectableFilteredData.length > 0 &&
     selectableFilteredData.every(record => selectedRecords.has(processedData.indexOf(record)));
 
   const renderEditableCell = (record, field, originalIndex) => {
@@ -1469,23 +1462,20 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
           { step: 4, label: 'Export Clean Data', active: workflowStep === 4, completed: false }
         ].map((item, index) => (
           <div key={item.step} className={`flex items-center ${index < 3 ? 'flex-1' : ''}`}>
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-              item.completed ? 'bg-green-600 text-white' :
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${item.completed ? 'bg-green-600 text-white' :
               item.active ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-600'
-            }`}>
+              }`}>
               {item.completed ? '✓' : item.step}
             </div>
-            <span className={`ml-2 text-sm ${
-              item.completed ? 'text-green-600' :
+            <span className={`ml-2 text-sm ${item.completed ? 'text-green-600' :
               item.active ? 'text-blue-600' : 'text-gray-500'
-            }`}>
+              }`}>
               {item.label}
             </span>
             {index < 3 && (
-              <div className={`flex-1 h-0.5 mx-4 ${
-                workflowStep > item.step ? 'bg-green-600' : 
+              <div className={`flex-1 h-0.5 mx-4 ${workflowStep > item.step ? 'bg-green-600' :
                 workflowStep === item.step ? 'bg-blue-600' : 'bg-gray-300'
-              }`} />
+                }`} />
             )}
           </div>
         ))}
@@ -1511,13 +1501,12 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
           <button
             onClick={onRemoveDuplicates}
             disabled={!workflowButtons.removeDuplicates.enabled || workflowButtons.removeDuplicates.loading}
-            className={`px-4 py-2 rounded-md border flex items-center gap-2 ${
-              !workflowButtons.removeDuplicates.enabled || workflowButtons.removeDuplicates.loading
-                ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
-                : workflowStep === 1 
-                  ? 'bg-red-600 text-white border-red-600 hover:bg-red-700'
-                  : 'bg-green-100 text-green-700 border-green-300'
-            }`}
+            className={`px-4 py-2 rounded-md border flex items-center gap-2 ${!workflowButtons.removeDuplicates.enabled || workflowButtons.removeDuplicates.loading
+              ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
+              : workflowStep === 1
+                ? 'bg-red-600 text-white border-red-600 hover:bg-red-700'
+                : 'bg-green-100 text-green-700 border-green-300'
+              }`}
           >
             {workflowButtons.removeDuplicates.loading ? (
               <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
@@ -1533,15 +1522,14 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
           <button
             onClick={onStandardizeRemaining}
             disabled={!workflowButtons.standardize.enabled || workflowButtons.standardize.loading}
-            className={`px-4 py-2 rounded-md border flex items-center gap-2 ${
-              !workflowButtons.standardize.enabled || workflowButtons.standardize.loading
-                ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
-                : workflowStep === 2
-                  ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700'
-                  : workflowStep > 2
-                    ? 'bg-green-100 text-green-700 border-green-300'
-                    : 'bg-gray-100 text-gray-400 border-gray-300'
-            }`}
+            className={`px-4 py-2 rounded-md border flex items-center gap-2 ${!workflowButtons.standardize.enabled || workflowButtons.standardize.loading
+              ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
+              : workflowStep === 2
+                ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700'
+                : workflowStep > 2
+                  ? 'bg-green-100 text-green-700 border-green-300'
+                  : 'bg-gray-100 text-gray-400 border-gray-300'
+              }`}
           >
             {workflowButtons.standardize.loading ? (
               <Settings size={16} className="animate-spin" />
@@ -1557,15 +1545,14 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
           <button
             onClick={onAnalyzeRecords}
             disabled={!workflowButtons.analyze.enabled || workflowButtons.analyze.loading}
-            className={`px-4 py-2 rounded-md border flex items-center gap-2 ${
-              !workflowButtons.analyze.enabled || workflowButtons.analyze.loading
-                ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
-                : workflowStep === 3
-                  ? 'bg-yellow-600 text-white border-yellow-600 hover:bg-yellow-700'
-                  : workflowStep > 3
-                    ? 'bg-green-100 text-green-700 border-green-300'
-                    : 'bg-gray-100 text-gray-400 border-gray-300'
-            }`}
+            className={`px-4 py-2 rounded-md border flex items-center gap-2 ${!workflowButtons.analyze.enabled || workflowButtons.analyze.loading
+              ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
+              : workflowStep === 3
+                ? 'bg-yellow-600 text-white border-yellow-600 hover:bg-yellow-700'
+                : workflowStep > 3
+                  ? 'bg-green-100 text-green-700 border-green-300'
+                  : 'bg-gray-100 text-gray-400 border-gray-300'
+              }`}
           >
             {workflowButtons.analyze.loading ? (
               <Search size={16} className="animate-spin" />
@@ -1579,16 +1566,15 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
 
           {/* Step 4: Export */}
           <button
-            onClick={onExport}
+            onClick={importToSupabase}
             disabled={!workflowButtons.export.enabled}
-            className={`px-4 py-2 rounded-md border flex items-center gap-2 ${
-              !workflowButtons.export.enabled
-                ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
-                : 'bg-green-600 text-white border-green-600 hover:bg-green-700'
-            }`}
+            className={`px-4 py-2 rounded-md border flex items-center gap-2 ${!workflowButtons.export.enabled
+              ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
+              : 'bg-green-600 text-white border-green-600 hover:bg-green-700'
+              }`}
           >
             <Download size={16} />
-            {workflowButtons.export.label}
+            {workflowButtons.export.label} by Diego
           </button>
         </div>
       </div>
@@ -1597,11 +1583,10 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
       <div className="flex flex-wrap gap-2">
         <button
           onClick={onToggleDuplicates}
-          className={`px-3 py-1 text-sm rounded-md border flex items-center gap-2 ${
-            showDuplicates
-              ? 'bg-gray-100 text-gray-700 border-gray-300'
-              : 'bg-orange-100 text-orange-700 border-orange-300'
-          }`}
+          className={`px-3 py-1 text-sm rounded-md border flex items-center gap-2 ${showDuplicates
+            ? 'bg-gray-100 text-gray-700 border-gray-300'
+            : 'bg-orange-100 text-orange-700 border-orange-300'
+            }`}
         >
           {showDuplicates ? <EyeOff size={14} /> : <Eye size={14} />}
           {showDuplicates ? 'Hide' : 'Show'} All Duplicates
@@ -1609,11 +1594,10 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
 
         <button
           onClick={onToggleMissingAddresses}
-          className={`px-3 py-1 text-sm rounded-md border flex items-center gap-2 ${
-            showMissingAddresses
-              ? 'bg-gray-100 text-gray-700 border-gray-300'
-              : 'bg-blue-100 text-blue-700 border-blue-300'
-          }`}
+          className={`px-3 py-1 text-sm rounded-md border flex items-center gap-2 ${showMissingAddresses
+            ? 'bg-gray-100 text-gray-700 border-gray-300'
+            : 'bg-blue-100 text-blue-700 border-blue-300'
+            }`}
         >
           {showMissingAddresses ? <EyeOff size={14} /> : <Eye size={14} />}
           {showMissingAddresses ? 'Hide' : 'Show'} Incomplete Address
@@ -1621,11 +1605,10 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
 
         <button
           onClick={onToggleReviewFilter}
-          className={`px-3 py-1 text-sm rounded-md border flex items-center gap-2 ${
-            showReviewOnly
-              ? 'bg-yellow-100 text-yellow-700 border-yellow-300'
-              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-          }`}
+          className={`px-3 py-1 text-sm rounded-md border flex items-center gap-2 ${showReviewOnly
+            ? 'bg-yellow-100 text-yellow-700 border-yellow-300'
+            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+            }`}
         >
           <Filter size={14} />
           {showReviewOnly ? 'Show All Records' : 'Show Issues Only'}
@@ -1654,11 +1637,10 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
               <button
                 onClick={onExportProgress}
                 disabled={!progressName.trim() || processedData.length === 0}
-                className={`px-4 py-2 rounded-md border flex items-center gap-2 ${
-                  !progressName.trim() || processedData.length === 0
-                    ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
-                    : 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700'
-                }`}
+                className={`px-4 py-2 rounded-md border flex items-center gap-2 ${!progressName.trim() || processedData.length === 0
+                  ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
+                  : 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700'
+                  }`}
               >
                 <Download size={16} />
                 Save
@@ -1697,11 +1679,11 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
       </div>
 
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-      <p className="text-sm text-blue-700 flex items-center gap-2">
-        <Edit3 size={16} />
-        <strong>Tip:</strong> Click on any cell to edit its contents directly. Check any row to include it for export (removes strikethrough/italic styling). Uncheck rows to exclude them and restore issue indicators. Use search icons in headers for bulk find & replace.
-      </p>
-    </div>
+        <p className="text-sm text-blue-700 flex items-center gap-2">
+          <Edit3 size={16} />
+          <strong>Tip:</strong> Click on any cell to edit its contents directly. Check any row to include it for export (removes strikethrough/italic styling). Uncheck rows to exclude them and restore issue indicators. Use search icons in headers for bulk find & replace.
+        </p>
+      </div>
 
       <div className="overflow-x-auto border border-gray-300 rounded-lg">
         <div className="min-w-full">
@@ -1804,7 +1786,7 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
                       )}
                       {(record.isDuplicateRemoved || record.hasRedDot) && (
                         <div className="absolute top-1 left-1">
-                          <div 
+                          <div
                             className="w-2 h-2 bg-red-500 rounded-full"
                             title={record.isDuplicateRemoved ? `Removed as duplicate: ${record.removedReason}` : record.additionalDuplicateReason || 'Duplicate record'}
                           />
@@ -1812,7 +1794,7 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
                       )}
                       {record.hasBlueDot && (
                         <div className="absolute bottom-1 left-1">
-                          <div 
+                          <div
                             className="w-2 h-2 bg-blue-500 rounded-full"
                             title="Missing or incomplete address information"
                           />
@@ -1820,7 +1802,7 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
                       )}
                       {record.hasAnalysisIssues && (
                         <div className="absolute bottom-1 right-1">
-                          <div 
+                          <div
                             className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"
                             title={`Analysis issues detected: ${record.analysisIssues?.join(', ')}`}
                           />
@@ -1846,11 +1828,10 @@ const ResultsStep = ({ processedData, filteredData, selectedRecords, selectedCou
                       {renderEditableCell(record, 'country', originalIndex)}
                     </td>
                     <td className={`border border-gray-300 px-1 py-1 text-sm ${textClass}`}>
-                      <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
-                        record.source === files[primaryFileIndex]?.name 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-blue-100 text-blue-800'
-                      }`}>
+                      <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${record.source === files[primaryFileIndex]?.name
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-blue-100 text-blue-800'
+                        }`}>
                         {record.source}
                       </span>
                     </td>
@@ -1974,10 +1955,10 @@ const useCustomerExtractor = () => {
   const [findReplaceField, setFindReplaceField] = useState(null);
   const [findReplaceFieldLabel, setFindReplaceFieldLabel] = useState('');
   const [progressName, setProgressName] = useState('');
-  
+
   // New state for tracking original row to company mapping
   const [originalRowToCompanyMapping, setOriginalRowToCompanyMapping] = useState(new Map());
-  
+
   // New workflow state
   const [workflowStep, setWorkflowStep] = useState(1); // 1: Remove Duplicates, 2: Standardize, 3: Analyze, 4: Export
   const [isRemovingDuplicates, setIsRemovingDuplicates] = useState(false);
@@ -1991,13 +1972,13 @@ const useCustomerExtractor = () => {
       const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          companyName, 
-          address, 
-          locationName, 
-          locationType, 
-          country, 
-          status 
+        body: JSON.stringify({
+          companyName,
+          address,
+          locationName,
+          locationType,
+          country,
+          status
         }),
       });
 
@@ -2049,37 +2030,37 @@ const useCustomerExtractor = () => {
 
     try {
       const duplicateGroups = new Map();
-      
+
       // Group records by similarity using both exact matches and fuzzy matching
       for (let i = 0; i < processedData.length; i++) {
         setAnalysisProgress({ current: i + 1, total: processedData.length });
-        
+
         const record = processedData[i];
         if (record.isProcessed) continue;
-        
+
         const group = [record];
         record.isProcessed = true;
-        
+
         // Find similar records
         for (let j = i + 1; j < processedData.length; j++) {
           const otherRecord = processedData[j];
           if (otherRecord.isProcessed) continue;
-          
+
           // Calculate company name similarity
           const companySimilarity = StringUtils.calculateCompanySimilarity(record.companyName, otherRecord.companyName);
-          
+
           // Calculate address similarity
           const addr1 = `${record.address1} ${record.city} ${record.state}`.toLowerCase().trim();
           const addr2 = `${otherRecord.address1} ${otherRecord.city} ${otherRecord.state}`.toLowerCase().trim();
           const addressSimilarity = StringUtils.jaccardSimilarity(addr1, addr2);
-          
+
           // If company names are very similar AND addresses are similar, consider as duplicate
           if (companySimilarity > 0.85 && addressSimilarity > 0.7) {
             group.push(otherRecord);
             otherRecord.isProcessed = true;
           }
         }
-        
+
         if (group.length > 1) {
           duplicateGroups.set(i, group);
         }
@@ -2088,7 +2069,7 @@ const useCustomerExtractor = () => {
       // Process duplicate groups and uncheck duplicates
       const deduplicatedRecords = [...processedData];
       const uncheckedIndices = new Set();
-      
+
       duplicateGroups.forEach(group => {
         // Sort by completeness and source priority
         group.sort((a, b) => {
@@ -2096,30 +2077,30 @@ const useCustomerExtractor = () => {
           const primaryFileName = files[primaryFileIndex]?.name;
           const aIsPrimary = a.source === primaryFileName ? 1 : 0;
           const bIsPrimary = b.source === primaryFileName ? 1 : 0;
-          
+
           if (aIsPrimary !== bIsPrimary) return bIsPrimary - aIsPrimary;
-          
+
           // Prefer records with more complete data
           const aCompleteness = [a.address1, a.address2, a.city, a.state, a.zipCode, a.locationName, a.locationType, a.country, a.status].filter(Boolean).length;
           const bCompleteness = [b.address1, b.address2, b.city, b.state, b.zipCode, b.locationName, b.locationType, b.country, b.status].filter(Boolean).length;
           return bCompleteness - aCompleteness;
         });
-        
+
         // Keep the best record checked, mark others as unchecked duplicates
         const bestRecord = group[0];
         const bestIndex = processedData.indexOf(bestRecord);
         deduplicatedRecords[bestIndex] = { ...bestRecord, isDuplicateKept: true, duplicateGroup: group.length };
-        
+
         // Mark others as duplicates and uncheck them
         for (let i = 1; i < group.length; i++) {
           const recordIndex = processedData.indexOf(group[i]);
           uncheckedIndices.add(recordIndex);
-          deduplicatedRecords[recordIndex] = { 
-            ...group[i], 
-            isDuplicateRemoved: true, 
+          deduplicatedRecords[recordIndex] = {
+            ...group[i],
+            isDuplicateRemoved: true,
             isStrikethrough: true,
             hasRedDot: true,
-            removedReason: `Duplicate of ${bestRecord.companyName}` 
+            removedReason: `Duplicate of ${bestRecord.companyName}`
           };
         }
       });
@@ -2137,17 +2118,17 @@ const useCustomerExtractor = () => {
       });
 
       setProcessedData(deduplicatedRecords);
-      
+
       const removedCount = uncheckedIndices.size;
       const groupCount = duplicateGroups.size;
-      
+
       showSuccess(
         `Duplicate removal complete! Found ${groupCount} duplicate group${groupCount !== 1 ? 's' : ''} and unchecked ${removedCount} duplicate record${removedCount !== 1 ? 's' : ''}. Duplicates are marked with strikethrough and red dots.`,
         'Duplicates Removed'
       );
-      
+
       setWorkflowStep(2);
-      
+
     } catch (error) {
       console.error('Error removing duplicates:', error);
       showError('An error occurred while removing duplicates. Please try again.');
@@ -2157,12 +2138,12 @@ const useCustomerExtractor = () => {
     }
   }, [processedData, files, primaryFileIndex, showSuccess, showError, showWarning]);
 
- // Step 2: Standardize remaining checked records
+  // Step 2: Standardize remaining checked records
   const standardizeRemainingRecords = useCallback(async () => {
-    const checkedRecords = processedData.filter((record, index) => 
+    const checkedRecords = processedData.filter((record, index) =>
       selectedRecords.has(index) && !record.isDuplicateRemoved
     );
-    
+
     if (checkedRecords.length === 0) {
       showWarning('No checked records to standardize. Please ensure records are selected and duplicates have been removed first.');
       return;
@@ -2170,23 +2151,23 @@ const useCustomerExtractor = () => {
 
     setIsStandardizing(true);
     setStandardizationProgress({ current: 0, total: checkedRecords.length });
-    
+
     try {
       const updatedData = [...processedData];
       const processedKeys = new Set(); // Track which duplicate groups we've already processed
       let totalUpdatedRecords = 0;
-      
+
       for (let i = 0; i < checkedRecords.length; i++) {
         const record = checkedRecords[i];
         const originalIndex = processedData.indexOf(record);
-        
+
         if (record.isDuplicateRemoved || !selectedRecords.has(originalIndex)) continue;
 
         setStandardizationProgress({ current: i + 1, total: checkedRecords.length });
 
         // Create a key to identify duplicate records
         const duplicateKey = `${record.companyName.toLowerCase().trim()}_${record.address1.toLowerCase().trim()}_${record.city.toLowerCase().trim()}`;
-        
+
         // Skip if we've already processed this duplicate group
         if (processedKeys.has(duplicateKey)) continue;
         processedKeys.add(duplicateKey);
@@ -2194,16 +2175,16 @@ const useCustomerExtractor = () => {
         const fullAddressParts = [record.address1, record.address2, record.city, record.state, record.zipCode].filter(Boolean);
         const fullAddress = fullAddressParts.join(', ');
 
-        const standardized = fullAddress.trim() 
+        const standardized = fullAddress.trim()
           ? await standardizeWithGemini(record.companyName, fullAddress, record.locationName, record.locationType, record.status, record.country)
           : {
-              companyName: record.companyName.replace(/\b\w/g, l => l.toUpperCase()).trim(),
-              locationName: record.locationName,
-              locationType: record.locationType,
-              status: record.status,
-              address1: '', address2: '', city: '', state: '', zipCode: '',
-              country: record.country
-            };
+            companyName: record.companyName.replace(/\b\w/g, l => l.toUpperCase()).trim(),
+            locationName: record.locationName,
+            locationType: record.locationType,
+            status: record.status,
+            address1: '', address2: '', city: '', state: '', zipCode: '',
+            country: record.country
+          };
 
         // Find all matching duplicate records (including the current one)
         const matchingRecords = [];
@@ -2216,9 +2197,9 @@ const useCustomerExtractor = () => {
 
         // Apply standardization to all matching records and update the mapping
         matchingRecords.forEach(({ record: matchRecord, index: matchIndex }) => {
-          const updatedRecord = { 
-            ...matchRecord, 
-            ...standardized, 
+          const updatedRecord = {
+            ...matchRecord,
+            ...standardized,
             isStandardized: true,
             originalData: {
               companyName: matchRecord.companyName,
@@ -2233,7 +2214,7 @@ const useCustomerExtractor = () => {
               country: matchRecord.country
             }
           };
-          
+
           updatedData[matchIndex] = updatedRecord;
 
           // Update the mapping for this processed record to point to the standardized data
@@ -2259,16 +2240,16 @@ const useCustomerExtractor = () => {
       }
 
       setProcessedData(updatedData);
-      
+
       const standardizedCount = checkedRecords.length;
-      
+
       showSuccess(
         `Standardization complete! Processed ${standardizedCount} checked record${standardizedCount !== 1 ? 's' : ''} and updated ${totalUpdatedRecords} total record${totalUpdatedRecords !== 1 ? 's' : ''} (including duplicates). Ready for analysis to identify additional issues.`,
         'Standardization Complete'
       );
-      
+
       setWorkflowStep(3);
-      
+
     } catch (error) {
       console.error('Error standardizing records:', error);
       showError('An error occurred while standardizing the records. Please try again.');
@@ -2281,7 +2262,7 @@ const useCustomerExtractor = () => {
   // Step 3: Analyze records to find additional duplicates and incomplete addresses
   const analyzeRecords = useCallback(async () => {
     const standardizedRecords = processedData.filter(r => r.isStandardized && !r.isDuplicateRemoved);
-    
+
     if (standardizedRecords.length === 0) {
       showWarning('No standardized records to analyze. Please standardize records first.');
       return;
@@ -2289,38 +2270,38 @@ const useCustomerExtractor = () => {
 
     setIsAnalyzing(true);
     setAnalysisProgress({ current: 0, total: standardizedRecords.length });
-    
+
     try {
       const updatedData = [...processedData];
       const uncheckedIndices = new Set();
-      
+
       // Step 1: Find additional duplicates from standardized data
       const duplicateGroups = new Map();
-      
+
       for (let i = 0; i < standardizedRecords.length; i++) {
         setAnalysisProgress({ current: i + 1, total: standardizedRecords.length });
-        
+
         const record = standardizedRecords[i];
         if (record.isAnalyzed) continue;
-        
+
         const group = [record];
         record.isAnalyzed = true;
-        
+
         // Find similar standardized records
         for (let j = i + 1; j < standardizedRecords.length; j++) {
           const otherRecord = standardizedRecords[j];
           if (otherRecord.isAnalyzed) continue;
-          
+
           // Check for exact matches after standardization
           const key1 = `${record.companyName.toLowerCase().trim()}_${record.address1.toLowerCase().trim()}_${record.city.toLowerCase().trim()}`;
           const key2 = `${otherRecord.companyName.toLowerCase().trim()}_${otherRecord.address1.toLowerCase().trim()}_${otherRecord.city.toLowerCase().trim()}`;
-          
+
           if (key1 === key2) {
             group.push(otherRecord);
             otherRecord.isAnalyzed = true;
           }
         }
-        
+
         if (group.length > 1) {
           duplicateGroups.set(i, group);
         }
@@ -2334,14 +2315,14 @@ const useCustomerExtractor = () => {
           const primaryFileName = files[primaryFileIndex]?.name;
           const aIsPrimary = a.source === primaryFileName ? 1 : 0;
           const bIsPrimary = b.source === primaryFileName ? 1 : 0;
-          
+
           if (aIsPrimary !== bIsPrimary) return bIsPrimary - aIsPrimary;
-          
+
           const aCompleteness = [a.address1, a.address2, a.city, a.state, a.zipCode, a.locationName, a.locationType, a.country, a.status].filter(Boolean).length;
           const bCompleteness = [b.address1, b.address2, b.city, b.state, b.zipCode, b.locationName, b.locationType, b.country, b.status].filter(Boolean).length;
           return bCompleteness - aCompleteness;
         });
-        
+
         // Keep the best record, mark others as additional duplicates
         for (let i = 1; i < group.length; i++) {
           const recordIndex = processedData.indexOf(group[i]);
@@ -2361,12 +2342,12 @@ const useCustomerExtractor = () => {
       let incompleteAddressCount = 0;
       processedData.forEach((record, index) => {
         if (record.isDuplicateRemoved || record.isAdditionalDuplicate) return;
-        
+
         // Check if address is incomplete
-        const hasIncompleteAddress = !record.address1 || !record.city || !record.state || !record.zipCode || 
-                                   record.address1.trim().length < 3 || record.city.trim().length < 2 || 
-                                   record.state.trim().length < 2 || record.zipCode.trim().length < 5;
-        
+        const hasIncompleteAddress = !record.address1 || !record.city || !record.state || !record.zipCode ||
+          record.address1.trim().length < 3 || record.city.trim().length < 2 ||
+          record.state.trim().length < 2 || record.zipCode.trim().length < 5;
+
         if (hasIncompleteAddress) {
           uncheckedIndices.add(index);
           updatedData[index] = {
@@ -2392,14 +2373,14 @@ const useCustomerExtractor = () => {
       });
 
       setProcessedData(updatedData);
-      
+
       showSuccess(
         `Analysis complete! Found ${additionalDuplicatesFound} additional duplicate${additionalDuplicatesFound !== 1 ? 's' : ''} (marked with strikethrough and red dots) and ${incompleteAddressCount} record${incompleteAddressCount !== 1 ? 's' : ''} with incomplete addresses (marked in italics with blue dots). These records have been unchecked.`,
         'Analysis Complete'
       );
-      
+
       setWorkflowStep(4);
-      
+
     } catch (error) {
       console.error('Error analyzing records:', error);
       showError('An error occurred while analyzing the records. Please try again.');
@@ -2411,24 +2392,24 @@ const useCustomerExtractor = () => {
 
   // Computed values
   const filteredData = useMemo(() => {
-  let filtered = [...processedData];
-  
-  if (!showMissingAddresses) {
-    filtered = filtered.filter(record => record.address1 && record.city && record.state && record.zipCode);
-  }
-  
-  if (!showDuplicates) {
-    filtered = filtered.filter(record => !record.isDuplicate && !record.isDuplicateRemoved && !record.isAdditionalDuplicate);
-  }
-  
-  if (showReviewOnly) {
-    filtered = filtered.filter(record => record.hasAnalysisIssues || record.isDuplicateRemoved);
-  }
-  
-  return filtered;
-}, [processedData, showMissingAddresses, showDuplicates, showReviewOnly]);
+    let filtered = [...processedData];
 
-  const selectedCount = useMemo(() => 
+    if (!showMissingAddresses) {
+      filtered = filtered.filter(record => record.address1 && record.city && record.state && record.zipCode);
+    }
+
+    if (!showDuplicates) {
+      filtered = filtered.filter(record => !record.isDuplicate && !record.isDuplicateRemoved && !record.isAdditionalDuplicate);
+    }
+
+    if (showReviewOnly) {
+      filtered = filtered.filter(record => record.hasAnalysisIssues || record.isDuplicateRemoved);
+    }
+
+    return filtered;
+  }, [processedData, showMissingAddresses, showDuplicates, showReviewOnly]);
+
+  const selectedCount = useMemo(() =>
     filteredData.filter(record => {
       const originalIndex = processedData.indexOf(record);
       return originalIndex !== -1 && selectedRecords.has(originalIndex);
@@ -2454,7 +2435,7 @@ const useCustomerExtractor = () => {
       standardize: {
         // Modified to stay enabled after step 2
         enabled: checkedRecords > 0 && workflowStep >= 2,
-        label: workflowStep === 2 
+        label: workflowStep === 2
           ? `Standardize Records (${checkedRecords} checked)`
           : `Re-Standardize Records (${checkedRecords} selected)`,
         loading: isStandardizing
@@ -2471,11 +2452,11 @@ const useCustomerExtractor = () => {
       }
     };
   }, [
-    processedData, 
-    selectedRecords, 
-    workflowStep, 
-    isRemovingDuplicates, 
-    isStandardizing, 
+    processedData,
+    selectedRecords,
+    workflowStep,
+    isRemovingDuplicates,
+    isStandardizing,
     isAnalyzing
   ]);
 
@@ -2493,7 +2474,7 @@ const useCustomerExtractor = () => {
         if (fileName.endsWith('.csv')) {
           const content = await file.text();
           parsed = FileUtils.parseCSV(content);
-          
+
           if (parsed.headers.length > 0 && parsed.data.length > 0) {
             fileData.push({
               name: file.name,
@@ -2504,7 +2485,7 @@ const useCustomerExtractor = () => {
         } else if (fileName.match(/\.(xlsx|xls)$/)) {
           const buffer = await file.arrayBuffer();
           parsed = FileUtils.parseExcel(buffer);
-          
+
           if (parsed.isMultiWorksheet) {
             filesNeedingWorksheetSelection.push({
               name: file.name,
@@ -2538,7 +2519,7 @@ const useCustomerExtractor = () => {
         showInfo(`Found multiple worksheets in ${filesNeedingWorksheetSelection.length} file(s). Please select the correct worksheets to continue.`, 'Worksheet Selection Required');
       } else {
         setFiles(fileData);
-        
+
         const initialMappings = {};
         fileData.forEach((file, index) => {
           initialMappings[index] = DataUtils.detectColumnMappings(file.headers);
@@ -2568,10 +2549,10 @@ const useCustomerExtractor = () => {
   const handleContinueFromWorksheetSelection = useCallback(async () => {
     try {
       const processedWorksheetFiles = [];
-      
+
       for (const fileWithWorksheets of filesWithWorksheets) {
         const parsed = FileUtils.parseExcelWorksheet(fileWithWorksheets.buffer, fileWithWorksheets.selectedWorksheetIndex);
-        
+
         if (parsed.headers.length > 0 && parsed.data.length > 0) {
           processedWorksheetFiles.push({
             name: fileWithWorksheets.name,
@@ -2637,10 +2618,10 @@ const useCustomerExtractor = () => {
           const zipCode = mapping.zipCode ? row[mapping.zipCode] || '' : '';
           const country = mapping.country ? row[mapping.country] || '' : '';
 
-          const hasAddressInfo = [address1, city, state, zipCode].some(field => 
+          const hasAddressInfo = [address1, city, state, zipCode].some(field =>
             field && field.trim().length > 0
           );
-          
+
           if (!hasAddressInfo) {
             console.log(`Skipping row for company "${companyName}" - no address information found`);
             continue;
@@ -2687,12 +2668,12 @@ const useCustomerExtractor = () => {
 
       console.log('Detecting near-duplicate company names...');
       const recordsWithNormalizedNames = DataUtils.findNearDuplicateCompanies(allRecords, files, primaryFileIndex);
-      
+
       const nearDuplicateCount = recordsWithNormalizedNames.filter(record => record.isNearDuplicate).length;
       if (nearDuplicateCount > 0) {
         showInfo(`Detected ${nearDuplicateCount} near-duplicate company names that have been normalized. Look for orange indicators in the results.`, 'Near Duplicates Found');
       }
-      
+
       const uniqueRecords = [];
       const duplicateGroups = new Map();
 
@@ -2711,9 +2692,9 @@ const useCustomerExtractor = () => {
           const primaryFileName = files[primaryFileIndex]?.name;
           const aIsPrimary = a.source === primaryFileName ? 1 : 0;
           const bIsPrimary = b.source === primaryFileName ? 1 : 0;
-          
+
           if (aIsPrimary !== bIsPrimary) return bIsPrimary - aIsPrimary;
-          
+
           const aCompleteness = [a.address1, a.address2, a.city, a.state, a.zipCode, a.locationName, a.locationType, a.country, a.status].filter(Boolean).length;
           const bCompleteness = [b.address1, b.address2, b.city, b.state, b.zipCode, b.locationName, b.locationType, b.country, b.status].filter(Boolean).length;
           return bCompleteness - aCompleteness;
@@ -2734,8 +2715,8 @@ const useCustomerExtractor = () => {
           const record2 = uniqueRecords[j];
 
           if (record1.companyName.toLowerCase() === record2.companyName.toLowerCase() &&
-              !record1.isDuplicate && !record2.isDuplicate &&
-              record1.address1 && record2.address1) {
+            !record1.isDuplicate && !record2.isDuplicate &&
+            record1.address1 && record2.address1) {
 
             const addr1 = record1.address1.toLowerCase().replace(/\s+/g, ' ').trim().substring(0, 15);
             const addr2 = record2.address1.toLowerCase().replace(/\s+/g, ' ').trim().substring(0, 15);
@@ -2769,17 +2750,17 @@ const useCustomerExtractor = () => {
 
       setProcessedData(uniqueRecords);
       setOriginalRowToCompanyMapping(rowMapping);
-      
+
       // Reset workflow to step 1 for new data
       setWorkflowStep(1);
-      
+
       // Initially check ALL records
       const initialSelection = new Set();
       uniqueRecords.forEach((record, index) => {
         initialSelection.add(index);
       });
       setSelectedRecords(initialSelection);
-      
+
       setStep(STEPS.RESULTS);
       const nearDuplicatesText = nearDuplicateCount > 0 ? ` ${nearDuplicateCount} near-duplicate companies were normalized.` : '';
       showSuccess(`Successfully processed ${uniqueRecords.length} records from ${files.length} file(s).${nearDuplicatesText} All records are initially checked. Start with "Remove Duplicates" to begin the data cleaning workflow.`, 'Processing Complete');
@@ -2792,10 +2773,10 @@ const useCustomerExtractor = () => {
   const standardizeRecords = async (indices) => {
     setIsStandardizing(true);
     setStandardizationProgress({ current: 0, total: indices.length });
-    
+
     try {
       const updatedData = [...processedData];
-      
+
       for (let i = 0; i < indices.length; i++) {
         const recordIndex = indices[i];
         const record = updatedData[recordIndex];
@@ -2806,20 +2787,20 @@ const useCustomerExtractor = () => {
         const fullAddressParts = [record.address1, record.address2, record.city, record.state, record.zipCode].filter(Boolean);
         const fullAddress = fullAddressParts.join(', ');
 
-        const standardized = fullAddress.trim() 
+        const standardized = fullAddress.trim()
           ? await standardizeWithGemini(record.companyName, fullAddress, record.locationName, record.locationType, record.status, record.country)
           : {
-              companyName: record.companyName.replace(/\b\w/g, l => l.toUpperCase()).trim(),
-              locationName: record.locationName,
-              locationType: record.locationType,
-              status: record.status,
-              address1: '', address2: '', city: '', state: '', zipCode: '',
-              country: record.country
-            };
+            companyName: record.companyName.replace(/\b\w/g, l => l.toUpperCase()).trim(),
+            locationName: record.locationName,
+            locationType: record.locationType,
+            status: record.status,
+            address1: '', address2: '', city: '', state: '', zipCode: '',
+            country: record.country
+          };
 
-        updatedData[recordIndex] = { 
-          ...record, 
-          ...standardized, 
+        updatedData[recordIndex] = {
+          ...record,
+          ...standardized,
           isStandardized: true,
           originalData: {
             companyName: record.companyName,
@@ -2855,15 +2836,15 @@ const useCustomerExtractor = () => {
       }
 
       setProcessedData(updatedData);
-      
+
       const recordCount = indices.length;
       showSuccess(
-        recordCount === processedData.length 
+        recordCount === processedData.length
           ? `Successfully standardized all ${recordCount} records.`
           : `Successfully standardized ${recordCount} record${recordCount !== 1 ? 's' : ''}.`,
         'Standardization Complete'
       );
-      
+
     } catch (error) {
       console.error('Error standardizing records:', error);
       showError('An error occurred while standardizing the records. Please try again.');
@@ -2891,7 +2872,7 @@ const useCustomerExtractor = () => {
       .filter(index => index !== -1);
 
     const allVisibleSelected = visibleSelectableIndices.every(index => selectedRecords.has(index));
-    
+
     setSelectedRecords(prev => {
       const newSelected = new Set(prev);
       if (allVisibleSelected) {
@@ -2976,94 +2957,169 @@ const useCustomerExtractor = () => {
     }
   }, [findReplaceFieldLabel, showSuccess, showError]);
 
-  // Export to CSV functionality with Orders and Commissions
-const exportToCSV = useCallback(() => {
-  try {
-    const selectedData = processedData.filter((record, index) => selectedRecords.has(index));
-    let finalExportData = [...selectedData];
-    
-    if (!showMissingAddresses) {
-      finalExportData = finalExportData.filter(record => record.address1 && record.city && record.state && record.zipCode);
-    }
-    if (!showDuplicates) {
-      finalExportData = finalExportData.filter(record => !record.isDuplicate || record.isSelectableDuplicate);
-    }
-
-    const companyGroups = new Map();
-    finalExportData.forEach(record => {
-      const companyKey = record.companyName.toLowerCase().trim();
-      if (!companyGroups.has(companyKey)) {
-        companyGroups.set(companyKey, []);
+  const importToSupabase = useCallback(async () => {
+    console.log("Import to Supabase starting")
+    try {
+      // 1. Preparar datos igual que en exportToCSV
+      const selectedData = processedData.filter((record, index) =>
+        selectedRecords.has(index)
+      )
+      let finalData = [...selectedData]
+      if (!showMissingAddresses) {
+        finalData = finalData.filter(r =>
+          r.address1 && r.city && r.state && r.zipCode
+        )
       }
-      companyGroups.get(companyKey).push(record);
-    });
+      if (!showDuplicates) {
+        finalData = finalData.filter(
+          r => !r.isDuplicate || r.isSelectableDuplicate
+        )
+      }
 
-    const customerNames = [];
-    const customerLocations = [];
+      // Agrupar por compañía
+      const companyGroups = new Map()
+      finalData.forEach(r => {
+        const key = r.companyName.toLowerCase().trim()
+        if (!companyGroups.has(key)) companyGroups.set(key, [])
+        companyGroups.get(key).push(r)
+      })
 
-    companyGroups.forEach(recordGroup => {
-      const sortedRecords = recordGroup.sort((a, b) => {
-        const addressA = `${a.address1} ${a.city} ${a.state} ${a.zipCode}`.toLowerCase();
-        const addressB = `${b.address1} ${b.city} ${b.state} ${b.zipCode}`.toLowerCase();
-        return addressA.localeCompare(addressB);
+      // Dividir en nombres y ubicaciones
+      const customerNames = []
+      const customerLocations = []
+      companyGroups.forEach(group => {
+        const sorted = group.sort((a, b) => {
+          const addrA = `${a.address1} ${a.city} ${a.state} ${a.zipCode}`.toLowerCase()
+          const addrB = `${b.address1} ${b.city} ${b.state} ${b.zipCode}`.toLowerCase()
+          return addrA.localeCompare(addrB)
+        })
+        if (sorted.length > 0) customerNames.push(sorted[0])
+        if (sorted.length > 1) customerLocations.push(...sorted.slice(1))
+      })
+
+      // 2. Insertar partners
+      const uniqueNames = [...new Set(customerNames.map(r => r.companyName.trim()))]
+      const { data: partners, error: errPartners } = await supabase
+        .from('partner')
+        .insert(uniqueNames.map(name => ({ name })))
+        .select('id, name')
+      if (errPartners) throw errPartners
+      const partnerMap = new Map(partners.map(p => [p.name, p.id]))
+
+      // 3. Insertar direcciones (names + locations)
+      const allAddresses = [...customerNames, ...customerLocations].map(r => ({
+        address1: r.address1,
+        address2: r.address2,
+        city: r.city,
+        state: r.state,
+        zip_code: r.zipCode
+      }))
+      const { data: addresses, error: errAddr } = await supabase
+        .from('address')
+        .insert(allAddresses)
+        .select('id')
+      if (errAddr) throw errAddr
+
+      // 4. Insertar customers
+      const customersToInsert = []
+      let idx = 0
+      customerNames.forEach(r => {
+        customersToInsert.push({
+          name: r.companyName,
+          partner_id: partnerMap.get(r.companyName),
+          address_id: addresses[idx++].id
+        })
+      })
+      customerLocations.forEach(r => {
+        customersToInsert.push({
+          name: r.companyName,
+          partner_id: partnerMap.get(r.companyName),
+          address_id: addresses[idx++].id
+        })
+      })
+      const { error: errCust } = await supabase
+        .from('customer')
+        .insert(customersToInsert)
+      if (errCust) throw errCust
+
+      // 5. Notificar éxito
+      showSuccess(
+        `Inserted ${customersToInsert.length} customer records`,
+        'Import Complete'
+      )
+    } catch (error) {
+      console.error('Error inserting data into Supabase:', error)
+      showError(
+        'An error occurred while inserting data. Please check the console and try again.'
+      )
+    }
+  }, [
+    processedData,
+    selectedRecords,
+    showMissingAddresses,
+    showDuplicates,
+    supabase,
+    showSuccess,
+    showError
+  ])
+
+  ///  // Export to CSV functionality with Orders and Commissions
+  const exportToCSV = useCallback(() => {
+    console.log("Click happening")
+    try {
+      const selectedData = processedData.filter((record, index) => selectedRecords.has(index));
+      let finalExportData = [...selectedData];
+
+      if (!showMissingAddresses) {
+        finalExportData = finalExportData.filter(record => record.address1 && record.city && record.state && record.zipCode);
+      }
+      if (!showDuplicates) {
+        finalExportData = finalExportData.filter(record => !record.isDuplicate || record.isSelectableDuplicate);
+      }
+
+      const companyGroups = new Map();
+      finalExportData.forEach(record => {
+        const companyKey = record.companyName.toLowerCase().trim();
+        if (!companyGroups.has(companyKey)) {
+          companyGroups.set(companyKey, []);
+        }
+        companyGroups.get(companyKey).push(record);
       });
 
-      if (sortedRecords.length > 0) customerNames.push(sortedRecords[0]);
-      if (sortedRecords.length > 1) customerLocations.push(...sortedRecords.slice(1));
-    });
+      const customerNames = [];
+      const customerLocations = [];
 
-    // Customer Names headers and format
-    const customerNamesHeaders = ['Partner', 'Customer Parent', 'Customer Name', 'Customer Type(s)', 'Exclusive Supplier(s)',	'Account Manager',	
-      'Support Solution',	'Billing Solution', 'Status', 'Name', 'Description', 'Primary Contact',	'Primary Contact Phone',	'Primary Contact Extension',	
-      'Primary Contact Email', 'Address One', 'Address Two', 'City', 'State', 'Zip Code', 'Country', 'Tax Identification Number',	
-      'Approach Date', 'Lead Source', 'Sub Agent', 'Sub Agent Percentage', 'Ownership', 'Vertical', 'Classification', 'URL', 'Count Employees', 
-      'Count Locations'];
-    const formatCustomerNameRecord = (record) => [
-      '""',
-      '""',
-      `"Wired"`,
-      '""',
-      '""',
-      '""',
-      '""',
-      `"Active"`,
-      '""',
-      `"${record.companyName.replace(/"/g, '""')}"`,
-      '""',
-      '""',
-      '""',
-      '""',
-      '""',
-      `"${record.address1.replace(/"/g, '""')}"`,
-      `"${record.address2.replace(/"/g, '""')}"`,
-      `"${record.city.replace(/"/g, '""')}"`,
-      `"${record.state.replace(/"/g, '""')}"`,
-      `"${record.zipCode.replace(/"/g, '""')}"`,
-      `"${record.country.replace(/"/g, '""')}"`,
-      '""',
-      '""',
-      '""',
-      '""',
-      '""',
-      '""',
-      '""',
-      '""',
-      '""',
-      '""',
-      '""'].join(',');
+      companyGroups.forEach(recordGroup => {
+        const sortedRecords = recordGroup.sort((a, b) => {
+          const addressA = `${a.address1} ${a.city} ${a.state} ${a.zipCode}`.toLowerCase();
+          const addressB = `${b.address1} ${b.city} ${b.state} ${b.zipCode}`.toLowerCase();
+          return addressA.localeCompare(addressB);
+        });
 
-    // Customer Locations headers and format
-    const customerLocationsHeaders = ['Customer', 'Location Name', 'Location Type', 'Location Number', 'Status', 'Sub Status', 'Billing Code',
-    'Address One', 'Address Two', 'City', 'State', 'Postal Code', 'Country', 'Primary Name', 'Primary Phone', 'Primary Phone Extension', 
-    'Primary Email', 'Secondary Name', 'Secondary Phone', 'Secondary Phone Extension', 'Secondary Email'];
-    const formatCustomerLocationRecord = (record) => {
-      const locationName = `${record.companyName} - ${record.city} ${record.state}`;
-      return [
-        `"${record.companyName.replace(/"/g, '""')}"`,
-        `"${locationName.replace(/"/g, '""')}"`,
-        `"Branch Office"`,
+        if (sortedRecords.length > 0) customerNames.push(sortedRecords[0]);
+        if (sortedRecords.length > 1) customerLocations.push(...sortedRecords.slice(1));
+      });
+
+      // Customer Names headers and format
+      const customerNamesHeaders = ['Partner', 'Customer Parent', 'Customer Name', 'Customer Type(s)', 'Exclusive Supplier(s)', 'Account Manager',
+        'Support Solution', 'Billing Solution', 'Status', 'Name', 'Description', 'Primary Contact', 'Primary Contact Phone', 'Primary Contact Extension',
+        'Primary Contact Email', 'Address One', 'Address Two', 'City', 'State', 'Zip Code', 'Country', 'Tax Identification Number',
+        'Approach Date', 'Lead Source', 'Sub Agent', 'Sub Agent Percentage', 'Ownership', 'Vertical', 'Classification', 'URL', 'Count Employees',
+        'Count Locations'];
+      const formatCustomerNameRecord = (record) => [
+        '""',
+        '""',
+        `"Wired"`,
+        '""',
+        '""',
+        '""',
         '""',
         `"Active"`,
+        '""',
+        `"${record.companyName.replace(/"/g, '""')}"`,
+        '""',
+        '""',
+        '""',
         '""',
         '""',
         `"${record.address1.replace(/"/g, '""')}"`,
@@ -3073,134 +3129,166 @@ const exportToCSV = useCallback(() => {
         `"${record.zipCode.replace(/"/g, '""')}"`,
         `"${record.country.replace(/"/g, '""')}"`,
         '""',
-      '""',
-      '""',
-      '""',
-      '""',
-      '""',
-      '""',
-      '""'].join(',');
-    };
+        '""',
+        '""',
+        '""',
+        '""',
+        '""',
+        '""',
+        '""',
+        '""',
+        '""',
+        '""'].join(',');
 
-    // Helper function to download CSV
-    const downloadCSV = (content, filename) => {
-      const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    };
+      // Customer Locations headers and format
+      const customerLocationsHeaders = ['Customer', 'Location Name', 'Location Type', 'Location Number', 'Status', 'Sub Status', 'Billing Code',
+        'Address One', 'Address Two', 'City', 'State', 'Postal Code', 'Country', 'Primary Name', 'Primary Phone', 'Primary Phone Extension',
+        'Primary Email', 'Secondary Name', 'Secondary Phone', 'Secondary Phone Extension', 'Secondary Email'];
+      const formatCustomerLocationRecord = (record) => {
+        const locationName = `${record.companyName} - ${record.city} ${record.state}`;
+        return [
+          `"${record.companyName.replace(/"/g, '""')}"`,
+          `"${locationName.replace(/"/g, '""')}"`,
+          `"Branch Office"`,
+          '""',
+          `"Active"`,
+          '""',
+          '""',
+          `"${record.address1.replace(/"/g, '""')}"`,
+          `"${record.address2.replace(/"/g, '""')}"`,
+          `"${record.city.replace(/"/g, '""')}"`,
+          `"${record.state.replace(/"/g, '""')}"`,
+          `"${record.zipCode.replace(/"/g, '""')}"`,
+          `"${record.country.replace(/"/g, '""')}"`,
+          '""',
+          '""',
+          '""',
+          '""',
+          '""',
+          '""',
+          '""',
+          '""'].join(',');
+      };
 
-    // Create and download Customer Names and Locations files
-    const customerNamesContent = [customerNamesHeaders.join(','), ...customerNames.map(formatCustomerNameRecord)].join('\n');
-    const customerLocationsContent = [customerLocationsHeaders.join(','), ...customerLocations.map(formatCustomerLocationRecord)].join('\n');
+      // Helper function to download CSV
+      const downloadCSV = (content, filename) => {
+        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      };
 
-    downloadCSV(customerNamesContent, 'Customer Names.csv');
-    if (customerLocations.length > 0) {
-      downloadCSV(customerLocationsContent, 'Customer Locations.csv');
-    }
+      // Create and download Customer Names and Locations files
+      const customerNamesContent = [customerNamesHeaders.join(','), ...customerNames.map(formatCustomerNameRecord)].join('\n');
+      const customerLocationsContent = [customerLocationsHeaders.join(','), ...customerLocations.map(formatCustomerLocationRecord)].join('\n');
 
-    // Create Orders and Commissions files with appended company data
-    let ordersCount = 0;
-    let commissionsCount = 0;
+      downloadCSV(customerNamesContent, 'Customer Names.csv');
+      if (customerLocations.length > 0) {
+        downloadCSV(customerLocationsContent, 'Customer Locations.csv');
+      }
 
-    files.forEach((file, fileIndex) => {
-      const isOrdersFile = file.name.toLowerCase().includes('order');
-      const isCommissionsFile = file.name.toLowerCase().includes('commission');
-      
-      if (!isOrdersFile && !isCommissionsFile) return;
+      // Create Orders and Commissions files with appended company data
+      let ordersCount = 0;
+      let commissionsCount = 0;
 
-      // Get the updated company data for each row
-      const enhancedRows = file.data.map((originalRow, rowIndex) => {
-        const mappingKey = `${fileIndex}-${rowIndex}`;
-        const companyData = originalRowToCompanyMapping.get(mappingKey);
-        
-        if (companyData) {
-          // Append company data to original row
-          return {
-            ...originalRow,
-            'Company Name': companyData.companyName,
-            'Address 1': companyData.address1,
-            'Address 2': companyData.address2,
-            'City': companyData.city,
-            'State': companyData.state,
-            'Zip Code': companyData.zipCode,
-            'Country': companyData.country
-          };
-        } else {
-          // No company data found, append empty company fields
-          return {
-            ...originalRow,
-            'Company Name': '',
-            'Address 1': '',
-            'Address 2': '',
-            'City': '',
-            'State': '',
-            'Zip Code': '',
-            'Country': ''
-          };
+      files.forEach((file, fileIndex) => {
+        const isOrdersFile = file.name.toLowerCase().includes('order');
+        const isCommissionsFile = file.name.toLowerCase().includes('commission');
+
+        if (!isOrdersFile && !isCommissionsFile) return;
+
+        // Get the updated company data for each row
+        const enhancedRows = file.data.map((originalRow, rowIndex) => {
+          const mappingKey = `${fileIndex}-${rowIndex}`;
+          const companyData = originalRowToCompanyMapping.get(mappingKey);
+
+          if (companyData) {
+            // Append company data to original row
+            return {
+              ...originalRow,
+              'Company Name': companyData.companyName,
+              'Address 1': companyData.address1,
+              'Address 2': companyData.address2,
+              'City': companyData.city,
+              'State': companyData.state,
+              'Zip Code': companyData.zipCode,
+              'Country': companyData.country
+            };
+          } else {
+            // No company data found, append empty company fields
+            return {
+              ...originalRow,
+              'Company Name': '',
+              'Address 1': '',
+              'Address 2': '',
+              'City': '',
+              'State': '',
+              'Zip Code': '',
+              'Country': ''
+            };
+          }
+        });
+
+        // Create headers including the new company fields
+        const enhancedHeaders = [
+          ...file.headers,
+          'Company Name',
+          'Address 1',
+          'Address 2',
+          'City',
+          'State',
+          'Zip Code',
+          'Country'
+        ];
+
+        // Format rows for CSV
+        const csvRows = enhancedRows.map(row => {
+          return enhancedHeaders.map(header => {
+            const value = row[header] || '';
+            return `"${String(value).replace(/"/g, '""')}"`;
+          }).join(',');
+        });
+
+        // Create CSV content
+        const csvContent = [
+          enhancedHeaders.join(','),
+          ...csvRows
+        ].join('\n');
+
+        // Download the file
+        if (isOrdersFile) {
+          downloadCSV(csvContent, 'Orders.csv');
+          ordersCount = enhancedRows.length;
+        } else if (isCommissionsFile) {
+          downloadCSV(csvContent, 'Commissions.csv');
+          commissionsCount = enhancedRows.length;
         }
       });
 
-      // Create headers including the new company fields
-      const enhancedHeaders = [
-        ...file.headers,
-        'Company Name',
-        'Address 1',
-        'Address 2',
-        'City',
-        'State',
-        'Zip Code',
-        'Country'
-      ];
-
-      // Format rows for CSV
-      const csvRows = enhancedRows.map(row => {
-        return enhancedHeaders.map(header => {
-          const value = row[header] || '';
-          return `"${String(value).replace(/"/g, '""')}"`;
-        }).join(',');
-      });
-
-      // Create CSV content
-      const csvContent = [
-        enhancedHeaders.join(','),
-        ...csvRows
-      ].join('\n');
-
-      // Download the file
-      if (isOrdersFile) {
-        downloadCSV(csvContent, 'Orders.csv');
-        ordersCount = enhancedRows.length;
-      } else if (isCommissionsFile) {
-        downloadCSV(csvContent, 'Commissions.csv');
-        commissionsCount = enhancedRows.length;
+      // Show success message
+      let exportMessage = `Downloaded ${customerNames.length} customer names`;
+      if (customerLocations.length > 0) {
+        exportMessage += ` and ${customerLocations.length} additional locations`;
       }
-    });
+      if (ordersCount > 0) {
+        exportMessage += `, ${ordersCount} orders with company data`;
+      }
+      if (commissionsCount > 0) {
+        exportMessage += `, ${commissionsCount} commissions with company data`;
+      }
+      exportMessage += '.';
 
-    // Show success message
-    let exportMessage = `Downloaded ${customerNames.length} customer names`;
-    if (customerLocations.length > 0) {
-      exportMessage += ` and ${customerLocations.length} additional locations`;
+      showSuccess(exportMessage, 'Export Complete');
+    } catch (error) {
+      console.error('Error exporting data:', error);
+      showError('An error occurred while exporting the data. Please try again.');
     }
-    if (ordersCount > 0) {
-      exportMessage += `, ${ordersCount} orders with company data`;
-    }
-    if (commissionsCount > 0) {
-      exportMessage += `, ${commissionsCount} commissions with company data`;
-    }
-    exportMessage += '.';
-
-    showSuccess(exportMessage, 'Export Complete');
-  } catch (error) {
-    console.error('Error exporting data:', error);
-    showError('An error occurred while exporting the data. Please try again.');
-  }
-}, [processedData, selectedRecords, showMissingAddresses, showDuplicates, files, originalRowToCompanyMapping, showSuccess, showError]);
+  }, [processedData, selectedRecords, showMissingAddresses, showDuplicates, files, originalRowToCompanyMapping, showSuccess, showError]);
 
   const resetAll = useCallback(() => {
     setStep(STEPS.UPLOAD);
@@ -3281,7 +3369,7 @@ const exportToCSV = useCallback(() => {
       const dataStr = JSON.stringify(progressData, null, 2);
       const blob = new Blob([dataStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      
+
       const link = document.createElement('a');
       link.href = url;
       link.download = `${progressName.trim().replace(/[^a-z0-9]/gi, '_').toLowerCase()}_progress.json`;
@@ -3316,7 +3404,7 @@ const exportToCSV = useCallback(() => {
       setShowReviewOnly(progressData.showReviewOnly !== undefined ? progressData.showReviewOnly : false);
       setWorkflowStep(progressData.workflowStep || 1);
       setProgressName(progressData.name);
-      
+
       if (progressData.files) {
         const restoredFiles = progressData.files.map(fileInfo => ({
           name: fileInfo.name,
@@ -3325,11 +3413,11 @@ const exportToCSV = useCallback(() => {
         }));
         setFiles(restoredFiles);
       }
-      
+
       if (progressData.primaryFileIndex !== undefined) {
         setPrimaryFileIndex(progressData.primaryFileIndex);
       }
-      
+
       if (progressData.columnMappings) {
         setColumnMappings(progressData.columnMappings);
       }
@@ -3341,12 +3429,12 @@ const exportToCSV = useCallback(() => {
       setStep(STEPS.RESULTS);
 
       const stats = progressData.stats;
-      const statsText = stats 
+      const statsText = stats
         ? ` (${stats.totalRecords} total records, ${stats.selectedCount} selected, ${stats.standardizedCount} standardized, ${stats.flaggedCount || 0} flagged)`
         : '';
-      
+
       showSuccess(`Progress "${progressData.name}" has been loaded successfully!${statsText} You can continue editing and processing from where you left off.`, 'Progress Loaded');
-      
+
     } catch (error) {
       console.error('Error importing progress:', error);
       showError('Error loading progress file. Please check that it is a valid progress file.');
@@ -3378,7 +3466,7 @@ const exportToCSV = useCallback(() => {
       const dataStr = JSON.stringify(mappingData, null, 2);
       const blob = new Blob([dataStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      
+
       const link = document.createElement('a');
       link.href = url;
       link.download = `${mappingName.trim().replace(/[^a-z0-9]/gi, '_').toLowerCase()}_mapping.json`;
@@ -3413,13 +3501,13 @@ const exportToCSV = useCallback(() => {
 
       setMappingName(mappingData.name);
       setColumnMappings(mappingData.columnMappings);
-      
+
       if (mappingData.primaryFileIndex !== undefined && mappingData.primaryFileIndex < files.length) {
         setPrimaryFileIndex(mappingData.primaryFileIndex);
       }
 
       showSuccess(`Mapping "${mappingData.name}" has been loaded successfully!`, 'Mapping Loaded');
-      
+
     } catch (error) {
       console.error('Error importing mapping:', error);
       showError('Error loading mapping file. Please check that it is a valid mapping file.');
@@ -3435,13 +3523,13 @@ const exportToCSV = useCallback(() => {
     showOriginalModal, selectedOriginalRecord, showNearDuplicateModal, selectedNearDuplicateRecord,
     showFindReplaceModal, findReplaceField, findReplaceFieldLabel, notifications, workflowStep, workflowButtons,
     setShowMissingAddresses, setShowDuplicates, setPrimaryFileIndex, setMappingName, setProgressName, removeNotification,
-    
+
     // Actions
-    handleFileUpload, handleWorksheetSelection, handleContinueFromWorksheetSelection, updateColumnMapping, processFiles, exportToCSV, resetAll, exportMapping, importMapping, exportProgress, importProgress,
+    handleFileUpload, handleWorksheetSelection, handleContinueFromWorksheetSelection, updateColumnMapping, processFiles, importToSupabase, resetAll, exportMapping, importMapping, exportProgress, importProgress,
     viewOriginalData, closeOriginalModal, viewNearDuplicateData, closeNearDuplicateModal, openFindReplaceModal, closeFindReplaceModal, handleFindReplace, analyzeRecords, toggleReviewFilter,
     removeDuplicates, standardizeRemainingRecords,
     toggleRecordSelection, toggleSelectAll, handleCellEdit, handleCellClick, handleCellBlur, removeNotification,
-    
+
     // Computed
     filteredData, selectedCount
   };
@@ -3458,13 +3546,13 @@ const CustomerExtractor = () => {
     selectedRecords, editingCell, step, isStandardizing, isAnalyzing, isRemovingDuplicates, standardizationProgress, analysisProgress, mappingName, progressName,
     showOriginalModal, selectedOriginalRecord, showNearDuplicateModal, selectedNearDuplicateRecord,
     showFindReplaceModal, findReplaceField, findReplaceFieldLabel, notifications, workflowStep, workflowButtons,
-    
+
     // Actions
     handleFileUpload, handleWorksheetSelection, handleContinueFromWorksheetSelection, updateColumnMapping, setPrimaryFileIndex, setShowMissingAddresses, setShowDuplicates, setMappingName, setProgressName,
-    toggleRecordSelection, toggleSelectAll, handleCellEdit, handleCellClick, handleCellBlur, processFiles, exportToCSV, resetAll, exportMapping, importMapping, exportProgress, importProgress,
+    toggleRecordSelection, toggleSelectAll, handleCellEdit, handleCellClick, handleCellBlur, processFiles, importToSupabase, resetAll, exportMapping, importMapping, exportProgress, importProgress,
     viewOriginalData, closeOriginalModal, viewNearDuplicateData, closeNearDuplicateModal, openFindReplaceModal, closeFindReplaceModal, handleFindReplace, analyzeRecords, toggleReviewFilter, removeNotification,
     removeDuplicates, standardizeRemainingRecords,
-    
+
     // Computed
     filteredData, selectedCount
   } = useCustomerExtractor();
@@ -3472,7 +3560,7 @@ const CustomerExtractor = () => {
   return (
     <div className="w-full min-h-screen bg-gray-50 p-2 md:p-4 lg:p-6">
       <SnackbarContainer notifications={notifications} onRemove={removeNotification} />
-      
+
       <div className="bg-white rounded-lg shadow-lg p-3 md:p-4 lg:p-6 w-full">
         <header className="mb-6">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-800 flex items-center gap-2">
@@ -3484,7 +3572,7 @@ const CustomerExtractor = () => {
         <StepIndicator currentStep={step} />
 
         {isStandardizing && (
-          <ProgressIndicator 
+          <ProgressIndicator
             current={standardizationProgress.current}
             total={standardizationProgress.total}
             label="Standardizing Records..."
@@ -3492,7 +3580,7 @@ const CustomerExtractor = () => {
         )}
 
         {isAnalyzing && (
-          <ProgressIndicator 
+          <ProgressIndicator
             current={analysisProgress.current}
             total={analysisProgress.total}
             label="Analyzing Records..."
@@ -3500,7 +3588,7 @@ const CustomerExtractor = () => {
         )}
 
         {isRemovingDuplicates && (
-          <ProgressIndicator 
+          <ProgressIndicator
             current={analysisProgress.current}
             total={analysisProgress.total}
             label="Removing Duplicates..."
@@ -3562,7 +3650,7 @@ const CustomerExtractor = () => {
             onAnalyzeRecords={analyzeRecords}
             onRemoveDuplicates={removeDuplicates}
             onStandardizeRemaining={standardizeRemainingRecords}
-            onExport={exportToCSV}
+            importToSupabase={importToSupabase}
             onReset={resetAll}
             onViewOriginalData={viewOriginalData}
             onViewNearDuplicateData={viewNearDuplicateData}

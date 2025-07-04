@@ -1,3 +1,7 @@
+------------------------------------------
+-- TO CREATE ALL THE DATABASE STRUCTURE --
+------------------------------------------
+
 BEGIN;
 
 -- Tabla Partner
@@ -46,5 +50,24 @@ CREATE TABLE IF NOT EXISTS mapping_field (
   column_name TEXT NOT NULL,
   normalized_name TEXT NOT NULL
 );
+
+COMMIT;
+
+
+
+-------------------------------------
+-- TO DELETE ALL THE DATABASE DATA --
+-------------------------------------
+
+BEGIN;
+
+TRUNCATE TABLE
+  customer,
+  mapping_field,
+  mapping_profile,
+  address,
+  partner
+RESTART IDENTITY
+CASCADE;
 
 COMMIT;
